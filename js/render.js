@@ -18,6 +18,50 @@ function shade(hex, f) {
 }
 
 /* ------------------------------------------------------------
+   صور الأصول (ART = data URI) — تُحمّل مرة واحدة وتتخزن
+   ------------------------------------------------------------ */
+const ART_IMG = {};
+function artImg(key) {
+  if (key in ART_IMG) return ART_IMG[key];
+  ART_IMG[key] = null;
+  if (typeof ART === 'undefined' || !ART[key]) return null;
+  const im = new Image();
+  ART_IMG[key] = im;
+  im.onload = () => { if (key.indexOf('t_') === 0) G._tilesDirty = true; };
+  im.src = ART[key];
+  return im;
+}
+function artReady(key) {
+  const im = artImg(key);
+  return !!(im && im.complete && im.naturalWidth > 0);
+}
+function preloadArt() {
+  if (typeof ART === 'undefined') return;
+  for (const k of Object.keys(ART)) {
+    if (k.indexOf('t_') === 0 || k.indexOf('b_') === 0) artImg(k);
+  }
+  G._tilesDirty = true;   // نخبز الأرض تاني بعد ما البلاطات تجهز
+}
+/* لو البلاطات اتحمّلت (أو فشلت) → أعد خَبز الأرض مرة واحدة */
+function tilesDirtyCheck() {
+  if (!G._tilesDirty) return;
+  for (let i = 0; i < 4; i++) {
+    const a = artImg('t_sand' + i), b = artImg('t_grass' + i);
+    if ((a && !a.complete) || (b && !b.complete)) return;
+  }
+  buildTerrainBake();
+  G._tilesDirty = false;
+}
+
+/* صورة مبنى العالم الجاهزة أو null (بنفس مفاتيح ART:b_*) */
+function artBuildingImg(b) {
+  if (b.built < 1) return null;
+  const key = b.key === 'house' ? 'b_house' + (b.id % 2) : 'b_' + b.key;
+  const im = artImg(key);
+  return (im && im.complete && im.naturalWidth > 0) ? im : null;
+}
+
+/* ------------------------------------------------------------
    خلفية الخريطة (مخبوزة مرة واحدة)
    ------------------------------------------------------------ */
 function buildTerrainBake() {
@@ -55,6 +99,17 @@ function bakeTile(c, x, y, OX) {
   const alt = (x * 7 + y * 11) % 5;
   c.fillStyle = alt === 0 ? shade(col, 1.05) : (alt === 3 ? shade(col, 0.95) : col);
   c.fill();
+
+  // بلاطة حقيقية من الأصول (CC0) لو محمّلة — بتغطي اللون الإجرائي
+  let tiled = false;
+  if (g === TER.SAND || g === TER.GRASS) {
+    const tkey = (g === TER.SAND ? 't_sand' : 't_grass') + ((x * 7 + y * 11) & 3);
+    if (artReady(tkey)) {
+      c.drawImage(artImg(tkey), nx - HW, ny, CFG.TW, CFG.TH);
+      tiled = true;
+    }
+  }
+
   c.strokeStyle = 'rgba(0,0,0,0.07)';
   c.lineWidth = 1;
   c.stroke();
@@ -65,12 +120,12 @@ function bakeTile(c, x, y, OX) {
     c.moveTo(cx - HW * 0.45, cy - 3);
     c.lineTo(cx + HW * 0.2, cy + 2);
     c.stroke();
-  } else if (g === TER.GRASS) {
+  } else if (!tiled && g === TER.GRASS) {
     if ((x * 13 + y * 5) % 4 === 0) {
       c.fillStyle = 'rgba(30,70,25,0.35)';
       c.fillRect(cx + ((x % 3) - 1) * 7, cy + ((y % 3) - 1) * 4, 3, 3);
     }
-  } else if (g === TER.SAND) {
+  } else if (!tiled && g === TER.SAND) {
     if ((x * 5 + y * 3) % 6 === 0) {
       c.fillStyle = 'rgba(150,125,70,0.35)';
       c.fillRect(cx - 5, cy + 2, 4, 2);
@@ -171,6 +226,7 @@ function render() {
     (G.vh / 2 - G.cam.y * z) * dpr
   );
 
+  tilesDirtyCheck();   // إعادة خَبز الأرض لو البلاطات اتحمّلت دلوقتي
   drawBakeView(ctx);
   drawObjects(ctx);
   drawProjectilesFx(ctx);
@@ -302,6 +358,11 @@ const BUILD_COL = {
 };
 const ROOF_COL = ['#b8483a', '#8f3428'];
 
+/* معامل عرض صورة المبنى الحقيقي نسبةً لعرض الماسة القاعدية */
+const BUILD_ART_FIT = {
+  keep: 1.15, house: 1.1, barracks: 1.15, tower: 1.0, mine: 1.15, lumber: 1.1
+};
+
 function drawBuilding(ctx, b) {
   const def = b.def;
   const cols = BUILD_COL[b.key] || ['#aaa', '#888', '#666'];
@@ -316,6 +377,27 @@ function drawBuilding(ctx, b) {
   const prog = b.built < 1 ? b.built : 1;
   const h = Math.max(6, def.height * (0.3 + 0.7 * prog));
   let topY = cy - h - 10;   // أعلى نقطة (الأيقونة والشريط فوقها)
+
+  // صورة حقيقية من الأصول (لو البناء خلّص والصورة جاهزة) بدل المكعب الإجرائي
+  const art = artBuildingImg(b);
+  if (art) {
+    const dw = (b.w + b.h) * HW * (BUILD_ART_FIT[b.key] || 1);
+    const dh = Math.round(dw * art.naturalHeight / art.naturalWidth);
+    const dx = cx - dw / 2, dy = sy + 6 - dh;
+    if (b.flash > 0) ctx.filter = 'brightness(1.6) saturate(2.4) sepia(0.5) hue-rotate(-20deg)';
+    ctx.drawImage(art, dx, dy, dw, dh);
+    ctx.filter = 'none';
+    topY = dy;
+    if (b.key === 'keep') {
+      // علم الفريق فوق القلعة
+      ctx.strokeStyle = '#3a2c18'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, dy + 10); ctx.lineTo(cx, dy - 22); ctx.stroke();
+      ctx.fillStyle = TEAM_COL[b.team];
+      ctx.beginPath(); ctx.moveTo(cx, dy - 22); ctx.lineTo(cx + 17, dy - 16);
+      ctx.lineTo(cx, dy - 10); ctx.closePath(); ctx.fill();
+      topY = dy - 26;
+    }
+  } else {
 
   // ظل
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -434,6 +516,7 @@ function drawBuilding(ctx, b) {
     ctx.fillStyle = '#fff';
     ctx.fillText(def.icon, cx, topY);
   }
+  } // نهاية الرسم الإجرائي (else)
 
   // شريط بناء / صحة
   if (b.built < 1) {
@@ -442,7 +525,7 @@ function drawBuilding(ctx, b) {
     bar(ctx, cx, topY - 15, 40, 5, b.hp / b.maxHp, b.team === 0 ? '#5fd07a' : '#e05a4a');
   }
 
-  if (b.flash > 0) {
+  if (b.flash > 0 && !art) {
     ctx.globalAlpha = Math.min(0.6, b.flash * 4);
     ctx.fillStyle = '#ff6b5a';
     ctx.beginPath();

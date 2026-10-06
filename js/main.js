@@ -66,6 +66,7 @@ function init() {
   G.mmCtx2 = mm.getContext('2d');
 
   resize();
+  preloadArt();        // يبدأ تحميل صور الأرض/المباني (وتُخبز الأرض تاني لما تجهز)
   generateMap();
   G.bgrid = new Array(G.w * G.h).fill(null);
   G.res_count = {

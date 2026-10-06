@@ -1,3 +1,41 @@
-ref/
+# ===== بيئات وأدوات داخلية =====
 .freebuff/
 node_modules/
+*.log
+
+# ===== نظام التشغيل =====
+Thumbs.db
+.DS_Store
+
+# ===== بيانات اللعبة الأصلية (Stronghold) — مصدر خارجي، لا يُدفع أبدًا =====
+ref/
+
+# ===== الأصول الخام النزيلة من النت =====
+# نتجاهل كل شيء ثم نُعيد فقط الملفات التي تقرأها tools/make-assets.js
+# (+ صفحات الفحص). لاستخدام ملف خام جديد لاحقًا: أضف سطر ! لمساره.
+tools/assets_raw/*
+# صفحات فحص الأصول (contact sheets)
+!tools/assets_raw/pick.html
+!tools/assets_raw/sheet.html
+!tools/assets_raw/sheet2.html
+!tools/assets_raw/dbg_ground.html
+# بلاطات الأرض المستخدمة (sand + grass)
+!tools/assets_raw/ground/
+tools/assets_raw/ground/*
+!tools/assets_raw/ground/sand_64x32.png
+!tools/assets_raw/ground/grass_green_64x32.png
+# مبانٍ FeudalWars المستخدمة
+!tools/assets_raw/fw_castle_7.png
+!tools/assets_raw/fw_house1_0.png
+!tools/assets_raw/fw_house1b.png
+!tools/assets_raw/fw_barracks_1.png
+!tools/assets_raw/fw_blacksmith.png
+!tools/assets_raw/fw_watchtower_lvl2-exp_full_size.png
+# مبنى Rubberduck المستخدم (المنشرة) — باقي الحزمة متجاهل
+!tools/assets_raw/rd/
+tools/assets_raw/rd/*
+!tools/assets_raw/rd/building_3/
+tools/assets_raw/rd/building_3/*
+!tools/assets_raw/rd/building_3/128x64_shaded/
+tools/assets_raw/rd/building_3/128x64_shaded/*
+!tools/assets_raw/rd/building_3/128x64_shaded/b3_128x64_shaded_00.png

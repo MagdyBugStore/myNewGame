@@ -1,6 +1,10 @@
 'use strict';
 /* ============================================================
-   يبني js/art.js من ملفات ref/Images و ref/fx
+   يبني js/art.js من:
+   - ref/Images و ref/fx        (بورتريه + أصوات Stronghold — داخلي/تعلّم)
+   - tools/assets_raw/ground    (بلاطات أرض CC0 — rubberduck)
+   - tools/assets_raw/fw_*.png  (مبانٍ CC0 — FeudalWars)
+   - tools/assets_raw/rd/       (مبانٍ CC0 — rubberduck)
    - يفكّ PNG (RGBA8, غير مضغوط) ويصغّره بمساحة البكسل (box filter)
    - يحوّل الصوت لـ data URI
    شغّل:  node tools/make-assets.js
@@ -42,6 +46,26 @@ const SND = {
   charge: 'armycharge1.wav',
   chop: 'chop1 22k.wav'
 };
+
+const RAW_DIR = path.join(ROOT, 'tools', 'assets_raw');
+
+/* بلاطات أرض — تُقص كخلايا 64×32 من أوراق ground (CC0) */
+const SHEET_COLS = 8;                    // الورقة 512×224 = 8 أعمدة × 7 صفوف
+const GROUND = {
+  sand: { file: 'sand_64x32.png', cells: [0, 1, 2, 3] },
+  grass: { file: 'grass_green_64x32.png', cells: [0, 1, 2, 3] }
+};
+
+/* مباني العالم — قص الحواف الشفافة ثم تصغير. w=0 يعني من غير تصغير */
+const BUILD_ART = [
+  { key: 'b_keep',     src: 'fw_castle_7.png',                                        w: 384 },
+  { key: 'b_house0',   src: 'fw_house1_0.png',                                        w: 0 },
+  { key: 'b_house1',   src: 'fw_house1b.png',                                         w: 0 },
+  { key: 'b_barracks', src: 'fw_barracks_1.png',                                      w: 288 },
+  { key: 'b_tower',    src: 'fw_watchtower_lvl2-exp_full_size.png',                   w: 300 },
+  { key: 'b_mine',     src: 'fw_blacksmith.png',                                      w: 288 },
+  { key: 'b_lumber',   src: 'rd/building_3/128x64_shaded/b3_128x64_shaded_00.png',    w: 256 }
+];
 
 /* ---------------- CRC32 ---------------- */
 const CRC_TABLE = (() => {
@@ -136,6 +160,31 @@ function resize(img, tw) {
     }
   }
   return { w: tw, h: th, data: out };
+}
+
+/* ---------------- قص منطقة ---------------- */
+function crop(img, x, y, w, h) {
+  const out = Buffer.alloc(w * h * 4);
+  for (let row = 0; row < h; row++) {
+    const src = ((y + row) * img.w + x) * 4;
+    img.data.copy(out, row * w * 4, src, src + w * 4);
+  }
+  return { w: w, h: h, data: out };
+}
+
+/* قص الحواف الشفافة (alpha > 8) */
+function trimAlpha(img) {
+  let x0 = img.w, y0 = img.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < img.h; y++) {
+    for (let x = 0; x < img.w; x++) {
+      if (img.data[(y * img.w + x) * 4 + 3] > 8) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return img;
+  return crop(img, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
 }
 
 /* ---------------- ترميز PNG ---------------- */
@@ -278,6 +327,37 @@ function main() {
       (small.w + 'x' + small.h).padEnd(9) + (png.length / 1024).toFixed(0) + ' KB');
   }
 
+  /* بلاطات الأرض: قص خلايا من الأوراق */
+  for (const gk of Object.keys(GROUND)) {
+    const g = GROUND[gk];
+    const f = path.join(RAW_DIR, 'ground', g.file);
+    if (!fs.existsSync(f)) { console.warn('  ! مفقود: ground/' + g.file); continue; }
+    const sheet = decodePng(f);
+    for (const cell of g.cells) {
+      const col = cell % SHEET_COLS, row = Math.floor(cell / SHEET_COLS);
+      const part = crop(sheet, col * 64, row * 32, 64, 32);
+      const png = encodePng(part);
+      const key = 't_' + gk + cell;
+      art[key] = 'data:image/png;base64,' + png.toString('base64');
+      artBytes += png.length;
+      console.log('  tile ' + key.padEnd(10) + g.file + '#' + cell + '  ' + (png.length / 1024).toFixed(1) + ' KB');
+    }
+  }
+
+  /* مباني العالم: قص + تصغير */
+  for (const ba of BUILD_ART) {
+    const f = path.join(RAW_DIR, ba.src);
+    if (!fs.existsSync(f)) { console.warn('  ! مفقود: ' + ba.src); continue; }
+    let im = trimAlpha(decodePng(f));
+    const ow = im.w, oh = im.h;
+    if (ba.w && im.w > ba.w) im = resize(im, ba.w);
+    const png = encodePng(im);
+    art[ba.key] = 'data:image/png;base64,' + png.toString('base64');
+    artBytes += png.length;
+    console.log('  bld  ' + ba.key.padEnd(12) + (ow + 'x' + oh).padEnd(10) + '→ ' +
+      (im.w + 'x' + im.h).padEnd(9) + (png.length / 1024).toFixed(0) + ' KB');
+  }
+
   const sfx = {};
   let sfxBytes = 0;
   const MAX_SEC = 1.6;          // نقص الأصوات الطويلة عشان الحجم
@@ -299,7 +379,7 @@ function main() {
     "'use strict';\n" +
     '/* ملف مولَّد تلقائي — لا تعدّله بإيدك.\n' +
     '   شغّل: node tools/make-assets.js\n' +
-    '   المصدر: ref/Images/*.png و ref/fx/*.wav (Stronghold Crusader — للاستخدام الداخلي/التعلّم) */\n' +
+    '   المصدر: ref/Images, ref/fx (Stronghold — داخلي/تعلّم) + ground/fw/rd (CC0) */\n' +
     'const ART = ' + JSON.stringify(art) + ';\n' +
     'const SFX = ' + JSON.stringify(sfx) + ';\n';
 

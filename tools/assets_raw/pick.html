@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html dir="ltr">
+<head>
+<meta charset="utf-8">
+<title>pick</title>
+<style>
+body{background:#2a2f3a;color:#eee;font:13px system-ui;margin:12px}
+h2{color:#ffd166;margin:18px 0 8px;border-bottom:1px solid #555;padding-bottom:4px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.it{background:#3a4150;padding:6px;border-radius:6px;text-align:center}
+.it img{display:block;background:
+  repeating-conic-gradient(#4a5162 0 25%, #3f4657 0 50%) 0 0/16px 16px;
+  max-width:300px;image-rendering:auto}
+.it .n{font-size:11px;color:#9fd;margin-top:3px}
+.g{display:flex;flex-wrap:wrap;gap:4px}
+.g div{text-align:center;font-size:10px;color:#9fd}
+.g img{display:block;background:#222;outline:1px solid #666}
+</style>
+</head>
+<body>
+<h2>/fw castle</h2>
+<div class="row">
+  <div class="it"><img src="fw_castle_7.png" style="width:300px"><div class="n">castle_7</div></div>
+  <div class="it"><img src="fw_castle_8.png" style="width:300px"><div class="n">castle_8</div></div>
+</div>
+<h2>/fw house</h2>
+<div class="row">
+  <div class="it"><img src="fw_house1_0.png" style="width:178px"><div class="n">house1_0</div></div>
+  <div class="it"><img src="fw_house1_1.png" style="width:178px"><div class="n">house1_1</div></div>
+  <div class="it"><img src="fw_house1b.png" style="width:175px"><div class="n">house1b</div></div>
+  <div class="it"><img src="fw_house1c.png" style="width:178px"><div class="n">house1c</div></div>
+</div>
+<h2>/fw barracks + others</h2>
+<div class="row">
+  <div class="it"><img src="fw_barracks_1.png" style="width:250px"><div class="n">barracks_1</div></div>
+  <div class="it"><img src="fw_barracks_2.png" style="width:250px"><div class="n">barracks_2</div></div>
+  <div class="it"><img src="fw_blacksmith.png" style="width:250px"><div class="n">blacksmith</div></div>
+  <div class="it"><img src="fw_archery_range.png" style="width:250px"><div class="n">archery_range</div></div>
+  <div class="it"><img src="fw_stable.png" style="width:250px"><div class="n">stable</div></div>
+</div>
+<h2>/fw watchtowers</h2>
+<div class="row">
+  <div class="it"><img src="fw_watchtower_lvl2-exp_full_size.png" style="width:300px"><div class="n">tower lvl2 (stone)</div></div>
+  <div class="it"><img src="fw_watchtower_wooden_full_size.png" style="width:300px"><div class="n">tower wooden</div></div>
+</div>
+<h2>/rd building_1 128x64 shaded _00.._07</h2>
+<div class="row" id="rd1"></div>
+<h2>/rd building_2 + building_3 (shaded _00)</h2>
+<div class="row" id="rd23"></div>
+<h2>/ground cells 0-23 (row0-2 = full tiles)</h2>
+<div class="row">
+  <div><div class="n">sand</div><div class="g" id="g_sand"></div></div>
+  <div><div class="n">grass_green</div><div class="g" id="g_grass"></div></div>
+  <div><div class="n">grass_dry</div><div class="g" id="g_dry"></div></div>
+  <div><div class="n">dirt_dark</div><div class="g" id="g_dd"></div></div>
+  <div><div class="n">stone_path</div><div class="g" id="g_sp"></div></div>
+</div>
+<script>
+const rd1=document.getElementById('rd1');
+for(let i=0;i<8;i++){const n='b1_128x64_shaded_'+String(i).padStart(2,'0')+'.png';
+rd1.insertAdjacentHTML('beforeend','<div class="it"><img src="rd/building_1/128x64_shaded/'+n+'" width="128"><div class="n">'+i+'</div></div>');}
+const rd23=document.getElementById('rd23');
+for(const b of ['building_2','building_3']){
+  rd23.insertAdjacentHTML('beforeend','<div class="it"><img src="rd/'+b+'/128x64_shaded/'+(b==='building_2'?'b2':'b3')+'_128x64_shaded_00.png" width="128"><div class="n">'+b+' _00</div></div>');
+  rd23.insertAdjacentHTML('beforeend','<div class="it"><img src="rd/'+b+'/128x64_shaded/'+b+'_128x64_00.png" width="128"><div class="n">'+b+' alt_00</div></div>');
+}
+const cols=8;
+for(const [id,type] of [['g_sand','sand'],['g_grass','grass_green'],['g_dry','grass_dry'],['g_dd','dirt_dark'],['g_sp','stone_path']]){
+  const el=document.getElementById(id);
+  for(let i=0;i<24;i++){
+    const c=i%cols,r=Math.floor(i/cols);
+    el.insertAdjacentHTML('beforeend','<div><div>'+i+'</div><div style="width:64px;height:32px;overflow:hidden;position:relative"><img src="ground/'+type+'_64x32.png" style="position:absolute;left:'+(-c*64)+'px;top:'+(-r*32)+'px"></div></div>');
+  }
+}
+</script>
+</body>
+</html>
