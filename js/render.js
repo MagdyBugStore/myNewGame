@@ -38,7 +38,7 @@ function artReady(key) {
 function preloadArt() {
   if (typeof ART === 'undefined') return;
   for (const k of Object.keys(ART)) {
-    if (k.indexOf('t_') === 0 || k.indexOf('b_') === 0) artImg(k);
+    if (k.indexOf('t_') === 0 || k.indexOf('b_') === 0 || k.indexOf('r_') === 0) artImg(k);
   }
   G._tilesDirty = true;   // نخبز الأرض تاني بعد ما البلاطات تجهز
 }
@@ -295,6 +295,14 @@ function shadow(ctx, x, y, rx, ry) {
    ------------------------------------------------------------ */
 function drawTree(ctx, x, y) {
   const p = tileCenter(x, y);
+  // صورة حقيقية من الأصول (CC0) لو محمّلة
+  const im = artImg('r_tree');
+  if (im && im.complete && im.naturalWidth > 0) {
+    shadow(ctx, p.x, p.y + 4, 13, 6);
+    const dw = 80, dh = dw * im.naturalHeight / im.naturalWidth;
+    ctx.drawImage(im, p.x - dw / 2, p.y + 6 - dh, dw, dh);
+    return;
+  }
   shadow(ctx, p.x, p.y + 4, 13, 6);
   // جذع
   ctx.fillStyle = '#6b4a2c';
@@ -314,6 +322,14 @@ function drawTree(ctx, x, y) {
 
 function drawRock(ctx, x, y, iron) {
   const p = tileCenter(x, y);
+  // صورة حقيقية من الأصول (CC0) لو محمّلة
+  const rim = artImg(iron ? 'r_iron' : 'r_rock');
+  if (rim && rim.complete && rim.naturalWidth > 0) {
+    shadow(ctx, p.x, p.y + 4, 15, 7);
+    const dw = 46, dh = dw * rim.naturalHeight / rim.naturalWidth;
+    ctx.drawImage(rim, p.x - dw / 2, p.y + 6 - dh, dw, dh);
+    return;
+  }
   shadow(ctx, p.x, p.y + 4, 15, 7);
   const c1 = iron ? '#4a4753' : '#8f8a81';
   const c2 = iron ? '#3a3844' : '#767168';
@@ -360,7 +376,8 @@ const ROOF_COL = ['#b8483a', '#8f3428'];
 
 /* معامل عرض صورة المبنى الحقيقي نسبةً لعرض الماسة القاعدية */
 const BUILD_ART_FIT = {
-  keep: 1.15, house: 1.1, barracks: 1.15, tower: 1.0, mine: 1.15, lumber: 1.1
+  keep: 1.15, house: 1.1, barracks: 1.15, tower: 1.0, mine: 1.15, lumber: 1.1,
+  farm: 0.8, quarry: 0.95
 };
 
 function drawBuilding(ctx, b) {

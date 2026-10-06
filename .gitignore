@@ -39,3 +39,14 @@ tools/assets_raw/rd/building_3/*
 !tools/assets_raw/rd/building_3/128x64_shaded/
 tools/assets_raw/rd/building_3/128x64_shaded/*
 !tools/assets_raw/rd/building_3/128x64_shaded/b3_128x64_shaded_00.png
+# Kenney medievalRTS (CC0) — الصخور وخام الحديد فقط
+!tools/assets_raw/kenney/
+tools/assets_raw/kenney/*
+!tools/assets_raw/kenney/PNG/
+tools/assets_raw/kenney/PNG/*
+!tools/assets_raw/kenney/PNG/Retina/
+tools/assets_raw/kenney/PNG/Retina/*
+!tools/assets_raw/kenney/PNG/Retina/Environment/
+tools/assets_raw/kenney/PNG/Retina/Environment/*
+!tools/assets_raw/kenney/PNG/Retina/Environment/medievalEnvironment_09.png
+!tools/assets_raw/kenney/PNG/Retina/Environment/medievalEnvironment_11.png

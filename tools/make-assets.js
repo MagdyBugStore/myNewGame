@@ -48,6 +48,7 @@ const SND = {
 };
 
 const RAW_DIR = path.join(ROOT, 'tools', 'assets_raw');
+const SH_DIR = path.join(ROOT, 'ref', 'extracted');     // Stronghold مستخرج (داخلي)
 
 /* بلاطات أرض — تُقص كخلايا 64×32 من أوراق ground (CC0) */
 const SHEET_COLS = 8;                    // الورقة 512×224 = 8 أعمدة × 7 صفوف
@@ -64,8 +65,43 @@ const BUILD_ART = [
   { key: 'b_barracks', src: 'fw_barracks_1.png',                                      w: 288 },
   { key: 'b_tower',    src: 'fw_watchtower_lvl2-exp_full_size.png',                   w: 300 },
   { key: 'b_mine',     src: 'fw_blacksmith.png',                                      w: 288 },
-  { key: 'b_lumber',   src: 'rd/building_3/128x64_shaded/b3_128x64_shaded_00.png',    w: 256 }
+  { key: 'b_lumber',   src: 'rd/building_3/128x64_shaded/b3_128x64_shaded_00.png',    w: 256 },
+  { key: 'b_farm',     src: 'sh:gfx/ST30_Wheatfarm.png',                                w: 192, keyBlack: true },
+  { key: 'b_quarry',   src: 'sh:gfx/ST20_Quarry.png',                                   w: 192, keyBlack: true }
 ];
+
+/* موارد الخريطة: الشجرة من Stronghold المستخرج، الصخور/الخام من Kenney (CC0) */
+const RES_ART = [
+  { key: 'r_tree', src: 'sh:gm/Tree_Chestnut/0040.png', w: 110 },
+  { key: 'r_rock', src: 'kenney/PNG/Retina/Environment/medievalEnvironment_09.png', w: 96 },
+  { key: 'r_iron', src: 'kenney/PNG/Retina/Environment/medievalEnvironment_11.png', w: 96 }
+];
+
+/* حل مصدر الملف: sh: = ref/extracted، غير كده = tools/assets_raw */
+function srcPath(s) {
+  return s.startsWith('sh:') ? path.join(SH_DIR, s.slice(3)) : path.join(RAW_DIR, s);
+}
+
+/* كشف الخلفية السودا (لصور gfx/ST*): إزالة الأسود المتصل بالحواف فقط */
+function keyBlack(img) {
+  const { w, h, data } = img;
+  const dark = (i) => data[i] < 26 && data[i + 1] < 26 && data[i + 2] < 26;
+  const vis = new Uint8Array(w * h);
+  const stack = [];
+  for (let x = 0; x < w; x++) { stack.push(x, 0, x, h - 1); }
+  for (let y = 0; y < h; y++) { stack.push(0, y, w - 1, y); }
+  while (stack.length) {
+    const y = stack.pop(), x = stack.pop();
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const p = y * w + x;
+    if (vis[p]) continue;
+    if (!dark(p * 4)) continue;
+    vis[p] = 1;
+    stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
+  }
+  for (let p = 0; p < w * h; p++) if (vis[p]) data[p * 4 + 3] = 0;
+  return img;
+}
 
 /* ---------------- CRC32 ---------------- */
 const CRC_TABLE = (() => {
@@ -346,9 +382,11 @@ function main() {
 
   /* مباني العالم: قص + تصغير */
   for (const ba of BUILD_ART) {
-    const f = path.join(RAW_DIR, ba.src);
+    const f = srcPath(ba.src);
     if (!fs.existsSync(f)) { console.warn('  ! مفقود: ' + ba.src); continue; }
-    let im = trimAlpha(decodePng(f));
+    let im = decodePng(f);
+    if (ba.keyBlack) im = keyBlack(im);
+    im = trimAlpha(im);
     const ow = im.w, oh = im.h;
     if (ba.w && im.w > ba.w) im = resize(im, ba.w);
     const png = encodePng(im);
@@ -356,6 +394,20 @@ function main() {
     artBytes += png.length;
     console.log('  bld  ' + ba.key.padEnd(12) + (ow + 'x' + oh).padEnd(10) + '→ ' +
       (im.w + 'x' + im.h).padEnd(9) + (png.length / 1024).toFixed(0) + ' KB');
+  }
+
+  /* موارد العالم: قص + تصغير */
+  for (const ra of RES_ART) {
+    const f = srcPath(ra.src);
+    if (!fs.existsSync(f)) { console.warn('  ! مفقود: ' + ra.src); continue; }
+    let im = trimAlpha(decodePng(f));
+    const ow = im.w, oh = im.h;
+    if (ra.w && im.w > ra.w) im = resize(im, ra.w);
+    const png = encodePng(im);
+    art[ra.key] = 'data:image/png;base64,' + png.toString('base64');
+    artBytes += png.length;
+    console.log('  res  ' + ra.key.padEnd(12) + (ow + 'x' + oh).padEnd(10) + '→ ' +
+      (im.w + 'x' + im.h).padEnd(9) + (png.length / 1024).toFixed(1) + ' KB');
   }
 
   const sfx = {};
