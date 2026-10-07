@@ -50,3 +50,6 @@ tools/assets_raw/kenney/PNG/Retina/*
 tools/assets_raw/kenney/PNG/Retina/Environment/*
 !tools/assets_raw/kenney/PNG/Retina/Environment/medievalEnvironment_09.png
 !tools/assets_raw/kenney/PNG/Retina/Environment/medievalEnvironment_11.png
+
+# Python cache
+__pycache__/

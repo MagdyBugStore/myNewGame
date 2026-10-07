@@ -45,14 +45,25 @@ function preloadArt() {
 /* لو البلاطات اتحمّلت (أو فشلت) → أعد خَبز الأرض مرة واحدة */
 function tilesDirtyCheck() {
   if (!G._tilesDirty) return;
-  for (const fam of ['t_sand', 't_grass', 't_gmed', 't_dirt']) {
-    for (let i = 0; i < 4; i++) {
-      const a = artImg(fam + i);
-      if (a && !a.complete) return;
+  if (typeof TILE_N !== 'undefined') {
+    for (const fam in TILE_N) {
+      for (let i = 0; i < TILE_N[fam]; i++) {
+        const a = artImg(fam + i);
+        if (a && !a.complete) return;
+      }
     }
   }
   buildTerrainBake();
   G._tilesDirty = false;
+}
+
+/* sprite مبنى SHC (من js/spr.js): {im, v} أو null لو الصورة لسه بتتحمّل / مفيش sprite */
+function sprBuilding(b) {
+  const m = typeof SPR_B !== 'undefined' && SPR_B[b.key];
+  if (!m) return null;
+  const v = m.v[b.id % m.v.length];
+  const im = artImg(v.k);
+  return (im && im.complete && im.naturalWidth > 0) ? { im: im, v: v } : null;
 }
 
 /* صورة مبنى العالم الجاهزة أو null (بنفس مفاتيح ART:b_*) */
@@ -72,6 +83,7 @@ function buildTerrainBake() {
   const cv = document.createElement('canvas');
   cv.width = bw; cv.height = bh;
   const c = cv.getContext('2d');
+  c.imageSmoothingEnabled = false;       // بلاطات SHC 30x16 بتتكبّر x2 بدون تنعيم
   const OX = H * CFG.HW;
   G.bake = cv; G.bakeOX = OX;
 
@@ -107,26 +119,33 @@ function bakeTile(c, x, y, OX) {
   // الاختيار بالـ hash (مش صيغة خطية كانت بتطلع شرائط قطرية منتظمة)
   // + عائلة متنوّعة: عشب عادي/متوسط، رمل/تربة لكسر التكرار (B2)
   let tiled = false;
-  if (g === TER.SAND || g === TER.GRASS) {
-    const fam = g === TER.SAND
-      ? ((hsh % 10 < 8) ? 't_sand' : 't_dirt')
-      : ((hsh % 10 < 7) ? 't_grass' : 't_gmed');
-    let tkey = fam + ((hsh >>> 8) & 3);
-    if (!artReady(tkey)) tkey = (g === TER.SAND ? 't_sand' : 't_grass') + ((hsh >>> 8) & 3);
-    if (artReady(tkey)) {
-      c.drawImage(artImg(tkey), nx - HW, ny, CFG.TW, CFG.TH);
-      tiled = true;
-    }
+  const tileKey = (fam) => {
+    const n = (typeof TILE_N !== 'undefined' && TILE_N[fam]) || 0;
+    return n ? fam + ((hsh >>> 8) % n) : null;
+  };
+  const drawTileArt = (key) => {
+    if (!key || !artReady(key)) return false;
+    const im = artImg(key);
+    const dh = im.naturalHeight * 2;
+    c.drawImage(im, nx - HW, ny + CFG.TH - dh, im.naturalWidth * 2, dh);
+    return true;
+  };
+  if (g === TER.SAND) tiled = drawTileArt(tileKey((hsh % 10 < 8) ? 't_sand' : 't_dirt'));
+  else if (g === TER.GRASS) tiled = drawTileArt(tileKey((hsh % 10 < 8) ? 't_grass' : 't_gmed'));
+  else if (g === TER.WATER) tiled = drawTileArt(tileKey('t_water'));
+  else if (g === TER.MOUNTAIN) {
+    drawTileArt(tileKey('t_sand'));                 // أرضية تحت الجبل
+    tiled = drawTileArt(tileKey('t_mtn'));
   }
 
   // بلاطة المية من غير إطار (كان بيطلع شبكة خطوط فوق البركة)
-  if (g !== TER.WATER) {
+  if (g !== TER.WATER && !tiled) {
     c.strokeStyle = 'rgba(0,0,0,0.07)';
     c.lineWidth = 1;
     c.stroke();
   }
 
-  if (g === TER.WATER) {
+  if (g === TER.WATER && !tiled) {
     c.strokeStyle = 'rgba(255,255,255,0.16)';
     c.beginPath();
     c.moveTo(cx - HW * 0.45, cy - 3);
@@ -142,7 +161,7 @@ function bakeTile(c, x, y, OX) {
       c.fillStyle = 'rgba(150,125,70,0.35)';
       c.fillRect(cx - 5, cy + 2, 4, 2);
     }
-  } else if (g === TER.MOUNTAIN) {
+  } else if (g === TER.MOUNTAIN && !tiled) {
     // ارتفاع ودرجة لون متغيّرين لكل بلاطة (كسر تكرار المثلثات المتطابقة)
     const mh = hash2(x + 31, y + 77);
     const apex = { x: cx, y: cy - (20 + (mh % 5) * 5) };
@@ -165,10 +184,13 @@ function bakeTile(c, x, y, OX) {
 }
 
 /* ألوان المزج: متوسط البلاطة الحقيقية (لو محمّلة) وإلا لون الإجرائي */
-const BLEND_COL = { 0: 'rgb(142,139,101)', 1: 'rgb(71,100,39)' };
 function blendColOf(g) {
+  if (typeof TILE_AVG !== 'undefined') {
+    const k = g === TER.WATER ? 't_water' : (g === TER.SAND ? 't_sand' : 't_grass');
+    const v = TILE_AVG[k];
+    if (v) return 'rgb(' + v[0] + ',' + v[1] + ',' + v[2] + ')';
+  }
   if (g === TER.WATER) return TER_WATER_COL;
-  if (artReady((g === TER.SAND ? 't_sand' : 't_grass') + '0')) return BLEND_COL[g];
   return TER_GROUND_COL[g];
 }
 function blendTileEdges(c, x, y, g, nx, ny) {
@@ -298,6 +320,15 @@ function drawObjects(ctx) {
   const b = viewBounds();
   const list = [];
 
+  // طبقة الأرض: أنقاض + جذوع
+  if (G.rubble) for (const r of G.rubble) drawRubble(ctx, r);
+  if (G.stump) {
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) if (G.stump[idx(x, y)] && !G.res[idx(x, y)]) drawStump(ctx, x, y);
+    }
+  }
+  if (G.corpses) for (const c of G.corpses) list.push({ d: c.x + c.y - 0.3, t: 'c', c: c });
+
   for (let y = b.y0; y <= b.y1; y++) {
     for (let x = b.x0; x <= b.x1; x++) {
       const r = G.res[idx(x, y)];
@@ -307,7 +338,7 @@ function drawObjects(ctx) {
   for (const bb of G.buildings) {
     if (bb.dead) continue;
     if (bb.x + bb.w < b.x0 || bb.x > b.x1 || bb.y + bb.h < b.y0 || bb.y > b.y1) continue;
-    list.push({ d: (bb.x + bb.w - 1) + (bb.y + bb.h - 1) + 1.4, t: 'b', b: bb });
+    list.push({ d: isFlatBuilding(bb) ? bb.x + bb.y - 0.5 : (bb.x + bb.w - 1) + (bb.y + bb.h - 1) + 1.4, t: 'b', b: bb });
   }
   for (const u of G.units) {
     if (u.dead) continue;
@@ -315,14 +346,83 @@ function drawObjects(ctx) {
     list.push({ d: u.x + u.y, t: 'u', u: u });
   }
 
-  list.sort((p, q) => p.d - q.d);
+  sortDepth(list);
   for (const it of list) {
     if (it.t === TER.TREE) drawTree(ctx, it.x, it.y);
     else if (it.t === TER.ROCK) drawRock(ctx, it.x, it.y, false);
     else if (it.t === TER.IRON) drawRock(ctx, it.x, it.y, true);
     else if (it.t === 'b') drawBuilding(ctx, it.b);
     else if (it.t === 'u') drawUnit(ctx, it.u);
+    else if (it.t === 'c') drawCorpse(ctx, it.c);
   }
+}
+
+/* مباني مسطّحة (حقول): دايمًا تحت كل حاجة. المخزن عنده أكوام طويلة فبيتفرز عادي */
+function isFlatBuilding(b) { return !!b.def.walk && b.key !== 'stockpile'; }
+
+/* صندوق الأرضية (بلاطات الشبكة) لكل عنصر: بيتحسب مرة واحدة لكل فريم */
+function depthBox(it) {
+  if (it.t === 'b') return { x0: it.b.x, x1: it.b.x + it.b.w, y0: it.b.y, y1: it.b.y + it.b.h };
+  if (it.t === 'u') return { x0: it.u.x + 0.25, x1: it.u.x + 0.75, y0: it.u.y + 0.25, y1: it.u.y + 0.75 };
+  if (it.t === 'c') return { x0: it.c.x + 0.25, x1: it.c.x + 0.75, y0: it.c.y + 0.25, y1: it.c.y + 0.75 };
+  return { x0: it.x, x1: it.x + 1, y0: it.y, y1: it.y + 1 };
+}
+
+/* ترتيب الرسم: ترتيب أساسي بـ x+y، وبعدين ترتيب طوبولوجي للمباني المتعددة البلاطات
+   (وحدة/شجرة جنب مبنى كبير بتتغطى أو بتغطي حسب صندوق أرضية المبنى مش مركزه) */
+function sortDepth(list) {
+  list.sort((p, q) => p.d - q.d);
+  const n = list.length;
+  const bigIdx = [];
+  for (let i = 0; i < n; i++) {
+    const it = list[i];
+    it.i = i;
+    if (it.t === 'b' && !isFlatBuilding(it.b) && (it.b.w > 1 || it.b.h > 1)) { it.box = depthBox(it); bigIdx.push(i); }
+  }
+  if (!bigIdx.length) return;
+  // behind[i] = العناصر اللي لازم تترسم قبل i
+  const behind = new Array(n);
+  const EPS = 0.001;
+  for (const bi of bigIdx) {
+    const B = list[bi], bb = B.box;
+    for (let j = 0; j < n; j++) {
+      if (j === bi) continue;
+      const O = list[j];
+      if (O.t === 'b' && isFlatBuilding(O.b)) continue;           // حقول/مخازن مكشوفة: دايمًا تحت
+      const ob = O.box || (O.box = depthBox(O));
+      // O وراء B؟  (O أصغر في x أو في y بالكامل)
+      const oBehindX = ob.x1 <= bb.x0 + EPS, oBehindY = ob.y1 <= bb.y0 + EPS;
+      const oFrontX = ob.x0 >= bb.x1 - EPS, oFrontY = ob.y0 >= bb.y1 - EPS;
+      let rel = 0;                                          // -1: O قبل B ، +1: O بعد B
+      if ((oBehindX || oBehindY) && !(oFrontX || oFrontY)) rel = -1;
+      else if ((oFrontX || oFrontY) && !(oBehindX || oBehindY)) rel = 1;
+      else continue;                                        // جنب بعض: الترتيب الأساسي يكفي
+      // بس لو فيه تداخل على الشاشة (قرب كفاية)
+      if (Math.abs((ob.x0 + ob.x1 - bb.x0 - bb.x1) - (ob.y0 + ob.y1 - bb.y0 - bb.y1)) > B.b.w + B.b.h + 3) continue;
+      if (rel < 0) (behind[bi] || (behind[bi] = [])).push(j);
+      else (behind[j] || (behind[j] = [])).push(bi);
+    }
+  }
+  const state = new Uint8Array(n);
+  // DFS تكراري: نزور كل عنصر بعد ما نرسم اللي وراه
+  const emit = [];
+  for (let s0 = 0; s0 < n; s0++) {
+    if (state[s0]) continue;
+    const st = [[s0, 0]];
+    state[s0] = 1;
+    while (st.length) {
+      const top = st[st.length - 1];
+      const deps = behind[top[0]];
+      if (deps && top[1] < deps.length) {
+        const nx = deps[top[1]++];
+        if (!state[nx]) { state[nx] = 1; st.push([nx, 0]); }
+      } else {
+        st.pop(); emit.push(top[0]);
+      }
+    }
+  }
+  const res = emit.map(i => list[i]);
+  for (let i = 0; i < n; i++) list[i] = res[i];
 }
 
 function tileCenter(x, y) {
@@ -339,17 +439,28 @@ function shadow(ctx, x, y, rx, ry) {
 /* ------------------------------------------------------------
    الموارد
    ------------------------------------------------------------ */
+const TREE_K = 1.4;                  // حجم الشجرة بالنسبة للأصل (SHC)
 function drawTree(ctx, x, y) {
   const p = tileCenter(x, y);
   // نوع الشجرة: رمل → نخل، عشب → تنويع hash بين كستن/بتول/صنوبر (B3)
   const sand = G.ground[idx(x, y)] === TER.SAND;
   const key = sand ? 'r_palm' : ['r_tree', 'r_tree2', 'r_tree3'][hash2(x, y) % 3];
-  const dw = { r_tree: 80, r_tree2: 72, r_tree3: 58, r_palm: 56 }[key] || 80;
   const im = artImg(key);
+  const dw = im && im.naturalWidth ? im.naturalWidth * TREE_K : 80;
   if (im && im.complete && im.naturalWidth > 0) {
-    shadow(ctx, p.x, p.y + 4, 13, 6);
+    shadow(ctx, p.x, p.y + 3, 14, 7);
+    ctx.imageSmoothingEnabled = false;
     const dh = dw * im.naturalHeight / im.naturalWidth;
-    ctx.drawImage(im, p.x - dw / 2, p.y + 6 - dh, dw, dh);
+    // أرجحة خفيفة + رجّة لما الفلاح يضرب الشجرة
+    const k = idx(x, y);
+    let sway = Math.sin(G.time * 1.25 + (hash2(x, y) % 628) / 100) * 0.018;
+    const sh = G.shake && G.shake.get(k);
+    if (sh) sway += Math.sin(sh * 55) * sh * 0.14;
+    ctx.save();
+    ctx.translate(p.x, p.y + 3);
+    ctx.transform(1, 0, sway, 1, 0, 0);
+    ctx.drawImage(im, -dw / 2, -dh, dw, dh);
+    ctx.restore();
     return;
   }
   shadow(ctx, p.x, p.y + 4, 13, 6);
@@ -372,11 +483,16 @@ function drawTree(ctx, x, y) {
 function drawRock(ctx, x, y, iron) {
   const p = tileCenter(x, y);
   // صورة حقيقية من الأصول (CC0) لو محمّلة
-  const rim = artImg(iron ? 'r_iron' : 'r_rock');
+  const rkey = iron ? 'r_iron' : 'r_rock';
+  const rn = (typeof RES_N !== 'undefined' && RES_N[rkey]) || 0;
+  const rim = rn ? artImg(rkey + (hash2(x, y) % rn)) : artImg(rkey);
   if (rim && rim.complete && rim.naturalWidth > 0) {
-    shadow(ctx, p.x, p.y + 4, 15, 7);
-    const dw = 46, dh = dw * rim.naturalHeight / rim.naturalWidth;
-    ctx.drawImage(rim, p.x - dw / 2, p.y + 6 - dh, dw, dh);
+    const kk = idx(x, y);
+    const ratio = G.amax && G.amax[kk] ? clamp(G.amount[kk] / G.amax[kk], 0.25, 1) : 1;
+    const sc = rn ? 2 * (0.7 + 0.3 * ratio) : 1;
+    const dw = rn ? rim.naturalWidth * sc : 46 * (0.55 + 0.45 * ratio), dh = rn ? rim.naturalHeight * sc : dw * rim.naturalHeight / rim.naturalWidth;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(rim, p.x - dw / 2, p.y + (rn ? CFG.HH : 4) - dh, dw, dh);
     return;
   }
   shadow(ctx, p.x, p.y + 4, 15, 7);
@@ -419,7 +535,14 @@ const BUILD_COL = {
   mine: ['#928d89', '#78736f', '#605b58'],
   barracks: ['#c4764f', '#a55f41', '#864c33'],
   wall: ['#9e9991', '#847f78', '#6b6660'],
-  tower: ['#b3ab97', '#978f7c', '#7c7563']
+  tower: ['#b3ab97', '#978f7c', '#7c7563'],
+  granary: ['#cdb98a', '#ad9b72', '#8c7c5a'],
+  armoury: ['#a9a49c', '#8c8780', '#6f6a64'],
+  mill: ['#e1d6bb', '#c2b595', '#a09373'],
+  bakery: ['#d9c09a', '#b9a07c', '#98825f'],
+  fletcher: ['#c3a572', '#a38757', '#83693f'],
+  poleturner: ['#c0a06a', '#a08256', '#80643c'],
+  blacksmith: ['#8f8984', '#767069', '#5c5752']
 };
 const ROOF_COL = ['#b8483a', '#8f3428'];
 
@@ -494,6 +617,29 @@ function drawWall(ctx, b, cols, h, nx, ny, ex, ey, sx, sy, wx, wy, cx, cy) {
   return cy - h - 12;
 }
 
+/* باب وشبابيك على وجهي المبنى الإجرائي */
+function drawDoorsWindows(ctx, b, wx, wy, sx, sy, ex, ey, h) {
+  const pt = (A, B, t, z) => ({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t - z });
+  const quad = (A, B, t0, t1, z0, z1, col) => {
+    const p0 = pt(A, B, t0, z0), p1 = pt(A, B, t1, z0), p2 = pt(A, B, t1, z1), p3 = pt(A, B, t0, z1);
+    ctx_fillQuad(ctx, p0, p1, p2, p3, col);
+  };
+  const Wp = { x: wx, y: wy }, Sp = { x: sx, y: sy }, Ep = { x: ex, y: ey };
+  if (b.key === 'stockpile' || b.key === 'farm') return;
+  // الوجه الأيمن (S→E): باب
+  quad(Sp, Ep, 0.38, 0.62, 0, h * 0.5, '#4a2f1a');
+  quad(Sp, Ep, 0.1, 0.24, h * 0.52, h * 0.78, '#e8d6a0');
+  quad(Sp, Ep, 0.76, 0.9, h * 0.52, h * 0.78, '#e8d6a0');
+  // الوجه الأيسر (W→S): شباكين
+  quad(Wp, Sp, 0.18, 0.36, h * 0.46, h * 0.76, '#e8d6a0');
+  quad(Wp, Sp, 0.62, 0.8, h * 0.46, h * 0.76, '#e8d6a0');
+}
+function ctx_fillQuad(ctx, p0, p1, p2, p3, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
 function drawBuilding(ctx, b) {
   const def = b.def;
   const cols = BUILD_COL[b.key] || ['#aaa', '#888', '#666'];
@@ -510,8 +656,45 @@ function drawBuilding(ctx, b) {
   let topY = cy - h - 10;   // أعلى نقطة (الأيقونة والشريط فوقها)
 
   // صورة حقيقية من الأصول (لو البناء خلّص والصورة جاهزة) بدل المكعب الإجرائي
-  const art = artBuildingImg(b);
-  if (art) {
+  const sp = (b.key === 'stockpile' || def.crop) ? null : sprBuilding(b);
+  const art = sp ? null : artBuildingImg(b);
+  if (b.key === 'stockpile' && b.built >= 1) {
+    topY = drawStockpile(ctx, b);
+  } else if (def.crop && b.built >= 1) {
+    topY = drawCropField(ctx, b);
+  } else if (sp) {
+    const v = sp.v, k = 2;
+    const dw = v.w * k, dh = v.h * k;
+    const dx = Math.round(sx - v.ax * k), dy = Math.round(sy - v.ay * k);
+    ctx.imageSmoothingEnabled = false;
+    if (b.flash > 0) ctx.filter = 'brightness(1.6) saturate(2.4) sepia(0.5) hue-rotate(-20deg)';
+    if (b.built < 1) {
+      // البناء: الصورة بتظهر من تحت لفوق حسب التقدّم
+      const rv = 0.12 + 0.88 * prog;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(dx, dy + dh * (1 - rv), dw, dh * rv); ctx.clip();
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(sp.im, dx, dy, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(sp.im, dx, dy, dw, dh);
+    }
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    topY = dy;
+    if (b.key === 'keep') {
+      const fx = sx, fy = dy + 24;
+      ctx.strokeStyle = '#3a2c18'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 34); ctx.stroke();
+      const fw = Math.sin(G.time * 4 + b.ph) * 2.6, fw2 = Math.sin(G.time * 4 + b.ph + 1.2) * 3;
+      ctx.fillStyle = TEAM_COL[b.team];
+      ctx.beginPath(); ctx.moveTo(fx, fy - 34);
+      ctx.quadraticCurveTo(fx + 12, fy - 34 + fw, fx + 26, fy - 28 + fw2);
+      ctx.quadraticCurveTo(fx + 12, fy - 20 + fw, fx, fy - 18); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; ctx.stroke();
+      topY = fy - 40;
+    }
+  } else if (art) {
     const dw = (b.w + b.h) * HW * (BUILD_ART_FIT[b.key] || 1);
     const dh = Math.round(dw * art.naturalHeight / art.naturalWidth);
     const dx = cx - dw / 2, dy = sy + 6 - dh;
@@ -525,9 +708,13 @@ function drawBuilding(ctx, b) {
       // علم الفريق فوق القلعة
       ctx.strokeStyle = '#3a2c18'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(cx, dy + 10); ctx.lineTo(cx, dy - 22); ctx.stroke();
+      // علم بيرفرف
+      const fw = Math.sin(G.time * 4 + b.ph) * 2.2, fw2 = Math.sin(G.time * 4 + b.ph + 1.2) * 2.6;
       ctx.fillStyle = TEAM_COL[b.team];
-      ctx.beginPath(); ctx.moveTo(cx, dy - 22); ctx.lineTo(cx + 17, dy - 16);
-      ctx.lineTo(cx, dy - 10); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx, dy - 22);
+      ctx.quadraticCurveTo(cx + 9, dy - 22 + fw, cx + 19, dy - 17 + fw2);
+      ctx.quadraticCurveTo(cx + 9, dy - 11 + fw, cx, dy - 10); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; ctx.stroke();
       topY = dy - 26;
     }
   } else if (b.key === 'wall') {
@@ -554,6 +741,8 @@ function drawBuilding(ctx, b) {
   ctx.beginPath();
   ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.lineTo(ex, ey - h); ctx.lineTo(sx, sy - h);
   ctx.closePath(); ctx.fill();
+
+  if (b.built >= 1 && b.key !== 'keep' && b.key !== 'wall') drawDoorsWindows(ctx, b, wx, wy, sx, sy, ex, ey, h);
 
   if (b.key === 'keep') {
     // سطح القلعة
@@ -654,6 +843,10 @@ function drawBuilding(ctx, b) {
   }
   } // نهاية الرسم الإجرائي (else)
 
+  // سقالات أثناء البناء + إضافات متحركة بعد الاكتمال
+  if (b.built < 1) drawScaffold(ctx, b, Math.max(10, def.height * 0.7));
+  else drawBuildingExtras(ctx, b, cx, cy, topY, h);
+
   // شريط بناء / صحة
   if (b.built < 1) {
     bar(ctx, cx, topY - 15, 40, 6, prog, '#e0b759');
@@ -661,7 +854,7 @@ function drawBuilding(ctx, b) {
     bar(ctx, cx, topY - 15, 40, 5, b.hp / b.maxHp, b.team === 0 ? '#5fd07a' : '#e05a4a');
   }
 
-  if (b.flash > 0 && !art) {
+  if (b.flash > 0 && !art && !sp) {
     ctx.globalAlpha = Math.min(0.6, b.flash * 4);
     ctx.fillStyle = '#ff6b5a';
     ctx.beginPath();
@@ -696,79 +889,33 @@ function bar(ctx, cx, cy, w, h, ratio, col) {
 function drawUnit(ctx, u) {
   const p = tileCenter(u.x, u.y);
   const px = p.x, py = p.y;
-  const teamC = TEAM_COL[u.team];
-  const darkC = TEAM_COL_DARK[u.team];
-  const isPeasant = !u.def.dmg;
 
-  shadow(ctx, px, py + 3, u.def.r * 0.9, u.def.r * 0.45);
+  if (!sprVariant(unitKind(u), u.team)) shadow(ctx, px, py + 3, u.def.r * 0.95, u.def.r * 0.45);
 
   if (G.sel.indexOf(u) >= 0) {
     ctx.strokeStyle = '#5fd07a';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.ellipse(px, py + 2, u.def.r + 4, (u.def.r + 4) * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(px, py + 2, u.def.r * 1.5 + 6, (u.def.r * 1.5 + 6) * 0.5, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  // الجسم
-  const bodyY = py - 9;
-  ctx.fillStyle = u.flash > 0 ? '#ffd9d0' : (isPeasant ? (u.team === 0 ? '#7a6a4e' : '#6a4e4e') : teamC);
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(px, bodyY, u.def.r * 0.72, u.def.r, 0, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
+  const a = u.an || { clip: 'idle', t: 0, dir: 0 };
+  const kind = unitKind(u);
+  const spec = CHAR[kind] || CHAR.peasant;
+  const clip = a.clip;
+  const frame = clipFrame(spec, clip, a.t);
+  const carryClip = clip === 'carry' || clip === 'carryidle' || clip === 'drop';
+  const load = (carryClip && u.carryN > 0) ? u.carry : (clip === 'drop' ? u.carry : null);
 
-  // الرأس
-  ctx.fillStyle = u.flash > 0 ? '#fff' : '#e9c496';
-  ctx.beginPath();
-  ctx.arc(px, bodyY - u.def.r - 2.5, 4.6, 0, Math.PI * 2);
-  ctx.fill();
-
-  if (!isPeasant) {
-    // خوذة بلون الفريق
-    ctx.fillStyle = darkC;
-    ctx.beginPath();
-    ctx.arc(px, bodyY - u.def.r - 3.5, 4.8, Math.PI, 0);
-    ctx.fill();
-  } else {
-    // قبعة الفلاح
-    ctx.fillStyle = u.team === 0 ? '#3d6ea8' : '#a8483d';
-    ctx.beginPath();
-    ctx.arc(px, bodyY - u.def.r - 3.5, 4.8, Math.PI, 0);
-    ctx.fill();
-  }
-
-  // سلاح
-  if (u.def.melee) {
-    ctx.strokeStyle = '#dcdcdc';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(px + 5, bodyY - 2);
-    ctx.lineTo(px + 11, bodyY - 13);
-    ctx.stroke();
-  } else if (u.def.proj) {
-    ctx.strokeStyle = '#c9a05a';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(px + 7, bodyY - 4, 6, -1.1, 1.1);
-    ctx.stroke();
-  }
-
-  // حمولة
-  if (u.carryN > 0) {
-    ctx.fillStyle = u.carry === 'wood' ? '#8a5a2c'
-      : u.carry === 'stone' ? '#9a958c'
-        : u.carry === 'iron' ? '#5d5a68' : '#e8b23c';
-    ctx.fillRect(px - 11, bodyY - 6, 7, 7);
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px - 11, bodyY - 6, 7, 7);
-  }
+  if (u.flash > 0) ctx.filter = 'brightness(1.7) saturate(0.6)';
+  drawChar(ctx, kind, u.team, clip, a.dir, frame, load, px, py + 1);
+  ctx.filter = 'none';
 
   // شريط صحة
   if (u.hp < u.maxHp) {
-    bar(ctx, px, bodyY - u.def.r - 16, 24, 4, u.hp / u.maxHp, u.team === 0 ? '#5fd07a' : '#e05a4a');
+    const uv = sprVariant(kind, u.team);
+    bar(ctx, px, py - (uv ? uv.ay * SPR_K + 4 : 40), 28, 4, u.hp / u.maxHp, u.team === 0 ? '#5fd07a' : '#e05a4a');
   }
 }
 
@@ -792,7 +939,30 @@ function drawEffectsFx(ctx) {
   for (const e of G.effects) {
     const k = e.t / e.life;
     const p = tileCenter(e.x, e.y);
-    if (e.kind === 'text') {
+    if (e.kind === 'chip') {
+      const tt = e.t;
+      const cx = p.x + e.vx * tt * 22, cy = p.y + e.vy * tt * 12 - (e.vz * tt - 38 * tt * tt);
+      ctx.globalAlpha = 1 - k;
+      ctx.fillStyle = e.color;
+      ctx.fillRect(cx - 1.5, cy - 14, 3, 3);
+      ctx.globalAlpha = 1;
+    } else if (e.kind === 'fall') {
+      // شجرة بتقع: جسم بيميل ويتلاشى
+      const im = artImg('r_tree');
+      const ang = (e.seed % 2 ? 1 : -1) * k * k * 1.45;
+      ctx.save();
+      ctx.translate(p.x, p.y + 6);
+      ctx.rotate(ang);
+      ctx.globalAlpha = 1 - k * k;
+      if (im && im.complete && im.naturalWidth > 0) {
+        const dw = 72, dh = dw * im.naturalHeight / im.naturalWidth;
+        ctx.drawImage(im, -dw / 2, -dh, dw, dh);
+      } else {
+        ctx.fillStyle = '#4a8a3a'; ctx.fillRect(-6, -48, 12, 48);
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    } else if (e.kind === 'text') {
       ctx.globalAlpha = 1 - k;
       ctx.font = 'bold 14px "Segoe UI", Arial';
       ctx.textAlign = 'center';

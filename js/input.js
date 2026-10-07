@@ -134,8 +134,8 @@ function onKey(e) {
     if (us.length) { us.forEach(u => api.stop(u)); logMsg('✋ إيقاف ' + us.length + ' وحدة'); }
     return;
   }
-  const n = parseInt(k, 10);
-  if (n >= 1 && n <= BUILD_ORDER.length) startPlacing(BUILD_ORDER[n - 1]);
+  if (k === 'b') { cycleBuildCat(); return; }
+  if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) { buildHotkey(parseInt(e.code.slice(5), 10)); return; }
 }
 function onKeyUp(e) { G.keys[e.key.toLowerCase()] = false; }
 

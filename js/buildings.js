@@ -80,7 +80,8 @@ function placeBuilding(key, x, y, team, free) {
     worker: null, retry: 0,
     resSpot: null,
     cd: 0, scan: Math.random() * 0.4,
-    dead: false, flash: 0
+    dead: false, flash: 0,
+    crop: def.crop ? 0.45 : 0, ph: Math.random() * 6.28
   };
 
   G.buildings.push(b);
@@ -88,7 +89,7 @@ function placeBuilding(key, x, y, team, free) {
   for (let j = 0; j < def.h; j++) {
     for (let i = 0; i < def.w; i++) {
       const k = idx(x + i, y + j);
-      G.blocked[k] = 1;
+      if (!def.walk) G.blocked[k] = 1;
       G.bgrid[k] = b;
     }
   }
@@ -105,10 +106,14 @@ function destroyBuilding(b) {
       if (G.bgrid) G.bgrid[k] = null;
     }
   }
-  if (b.worker) { b.worker.job = null; b.worker.state = 'idle'; b.worker = null; }
+  if (b.worker) { b.worker.job = null; b.worker.state = 'idle'; b.worker.act = null; b.worker = null; }
+  if (!G.rubble) G.rubble = [];
+  if (b.key !== 'wall') G.rubble.push({ x: b.x, y: b.y, w: b.w, h: b.h, t: 0, seed: b.id });
   const si = G.sel.indexOf(b);
   if (si >= 0) G.sel.splice(si, 1);
-  addBurst(b.x + b.w / 2, b.y + b.h / 2, '#d9a441');
+  for (let i = 0; i < 6; i++) {
+    addBurst(b.x + Math.random() * b.w, b.y + Math.random() * b.h, i % 2 ? '#c9b48a' : '#8f866f', 0.8 + Math.random() * 0.5);
+  }
   sfx('wreck', 0.6);
 
   if (b.key === 'keep') {
@@ -132,7 +137,7 @@ function damageBuilding(b, dmg, fx, fy) {
 function finalizeBuilding(b) {
   b.built = 1;
   b.hp = b.maxHp;
-  if (b.def.prod) b.resSpot = findResourceSpot(b, null);
+  if (b.def.prod && b.def.req !== undefined) b.resSpot = findResourceSpot(b, null);
   if (b.def.pop && b.team === 0 && b.key !== 'keep') {
     logMsg('تم بناء ' + b.def.name + ' (+ ' + b.def.pop + ' سكان)', 'good');
   }
@@ -154,13 +159,14 @@ function findResourceSpot(b, exclude) {
   if (!def.prod) return null;
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
 
-  if (def.prod === 'food') {
-    const t = ringWalkable(b);
-    return t ? { x: t.x, y: t.y, kind: 'farm' } : null;
+  if (def.crop) {
+    // نقطة عشوائية داخل الحقل (الحقل مفتوح للمشي)
+    const tx = b.x + ((Math.random() * b.w) | 0), ty = b.y + ((Math.random() * b.h) | 0);
+    return { x: tx, y: ty, kind: 'crop' };
   }
 
   // G.res بيخزّن أكواد TER (4/5/6) مش أسماء الموارد
-  const need = { wood: TER.TREE, stone: TER.ROCK, iron: TER.IRON }[def.prod];
+  const need = def.req;
   if (need === undefined) return null;
 
   let best = null, bestD = 1e9;
@@ -198,32 +204,61 @@ function freeTileNear(b) {
   return spots[(Math.random() * spots.length) | 0];
 }
 
-function trySpawnWorker(b) {
-  if (b.worker && !b.worker.dead) return;
-  if (b.team !== 0) return;
-  if (G.pop >= G.popCap) return;   // نجرّب تاني بعد شوية
-  const spot = freeTileNear(b);
-  if (!spot) return;
-  const u = spawnUnit('peasant', 0, spot.x + 0.5, spot.y + 0.5);
-  if (!u) return;
-  attachJob(u, b);
+/* ------------------------------------------------------------
+   العمال: تعيين + هجرة
+   ------------------------------------------------------------ */
+function isUnemployed(u) {
+  return !u.dead && u.team === 0 && !u.def.dmg && !(u.job && !u.job.dead) && !u.manual;
+}
+
+/** يدوّر على فلاح عاطل ويعيّنه للمبنى */
+function requestWorker(b) {
+  let best = null, bestD = 1e9;
+  for (const u of G.units) {
+    if (!isUnemployed(u)) continue;
+    const d = Math.hypot(u.x - b.x, u.y - b.y);
+    if (d < bestD) { bestD = d; best = u; }
+  }
+  if (best) attachJob(best, b);
 }
 
 function attachJob(u, b) {
   u.job = b;
   u.state = 'idle';
+  u.act = null;
   u.res = null;
   u.tried = null;
   u.timer = 0;
+  u.path = null;
   b.worker = u;
 }
 
-function nearestDrop(x, y, team) {
+/* ------------------------------------------------------------
+   المخازن
+   ------------------------------------------------------------ */
+function storeKindOf(item) {
+  for (const k in BUILD_DEFS) if (BUILD_DEFS[k].store && BUILD_DEFS[k].store.indexOf(item) >= 0) return k;
+  return null;
+}
+function storageCap(item, team) {
+  let cap = 0;
+  for (const b of G.buildings) {
+    if (b.dead || b.team !== team || b.built < 1 || !b.def.store) continue;
+    if (b.def.store.indexOf(item) >= 0) cap += b.def.cap;
+  }
+  return cap;
+}
+function storageRoom(item, team) {
+  return storageCap(item, team) - G.res_count[item];
+}
+/** أقرب مخزن بيقبل الصنف ده (وفيه مكان لو room=true) */
+function nearestStorage(x, y, team, item, needRoom) {
+  if (needRoom && storageRoom(item, team) <= 0) return null;
   let best = null, bestD = 1e9;
   for (const b of G.buildings) {
-    if (b.dead || b.team !== team || !b.def.drop) continue;
-    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    const d = Math.hypot(cx - x, cy - y);
+    if (b.dead || b.team !== team || b.built < 1 || !b.def.store) continue;
+    if (b.def.store.indexOf(item) < 0) continue;
+    const d = Math.hypot(b.x + b.w / 2 - x, b.y + b.h / 2 - y);
     if (d < bestD) { bestD = d; best = b; }
   }
   return best;
@@ -244,10 +279,14 @@ function updateBuildings(dt) {
       continue;
     }
 
-    // عمال
-    if (b.def.prod && b.team === 0 && (!b.worker || b.worker.dead)) {
+    // نمو المحاصيل
+    if (b.def.crop && b.crop < 1) b.crop = Math.min(1, b.crop + dt / b.def.grow);
+
+    // عمال: نطلب فلاح عاطل (الهجرة بتجيب فلاحين جداد عند القلعة)
+    if ((b.def.prod || b.def.job) && b.team === 0 && (!b.worker || b.worker.dead)) {
+      b.worker = null;
       b.retry -= dt;
-      if (b.retry <= 0) { b.retry = 1.2; trySpawnWorker(b); }
+      if (b.retry <= 0) { b.retry = 1.0; requestWorker(b); }
     }
 
     // تدريب
@@ -319,8 +358,54 @@ function updatePop() {
   G.houses = houses;
 }
 
+const TAX_POP = [8, 3, -2, -7, -12, -17];      // تأثير مستوى الضريبة على الشعبية
+const RATION_POP = [-10, -3, 2, 6];            // تأثير الحصص
+const RATION_MULT = [0, 0.5, 1, 2];
+
 function updateEconomy(dt) {
-  G.res_count.gold += (G.pop * CFG.TAX_POP + G.houses * CFG.TAX_HOUSE) * dt;
+  let peasants = 0;
+  for (const u of G.units) if (!u.dead && u.team === 0 && !u.def.dmg) peasants++;
+
+  // أكل: الكل بياكل حسب الحصة
+  const eat = RATION_MULT[G.rations] * CFG.EAT * G.pop * dt;
+  G.starving = false;
+  if (eat > 0) {
+    if (G.res_count.food >= eat) G.res_count.food -= eat;
+    else { G.res_count.food = 0; G.starving = true; }
+  }
+
+  // ضريبة
+  G.res_count.gold += peasants * G.tax * CFG.TAX_PER * dt;
+
+  // الشعبية
+  const target = 50 + TAX_POP[G.tax] + RATION_POP[G.rations]
+    + (G.starving ? -25 : 0) + (G.pop >= G.popCap && G.popCap > 0 ? -2 : 0);
+  const dp = clamp(target - G.popularity, -2 * dt, 2 * dt);
+  G.popularity = clamp(G.popularity + dp, 0, 100);
+  G.popTarget = target;
+
+  // هجرة: فلاحين جداد عند القلعة لو الشعبية كويسة وفيه سكن
+  const keep = G.playerKeep && !G.playerKeep.dead ? G.playerKeep : null;
+  if (keep && G.pop < G.popCap && G.popularity >= 30) {
+    G.immT -= dt * (0.5 + G.popularity / 60);
+    if (G.immT <= 0) {
+      G.immT = 7;
+      const spot = freeTileNear(keep);
+      if (spot) {
+        const u = spawnUnit('peasant', 0, spot.x + 0.5, spot.y + 0.5);
+        if (u) addFloat(u.x, u.y, 'وصل فلاح', '#cfe8ff');
+      }
+    }
+  }
+  // هروب: شعبية منخفضة جدًا
+  if (G.popularity < 15) {
+    G.leaveT = (G.leaveT === undefined ? 12 : G.leaveT) - dt;
+    if (G.leaveT <= 0) {
+      G.leaveT = 12;
+      const u = G.units.find(isUnemployed) || G.units.find(x => !x.dead && x.team === 0 && !x.def.dmg);
+      if (u) { killUnit(u, true); logMsg('فلاح هرب من المدينة — الشعبية منخفضة', 'bad'); }
+    }
+  }
 }
 
 /* ------------------------------------------------------------
@@ -338,7 +423,11 @@ function canTrain(b, type) {
 function queueUnit(b, type) {
   if (!b || b.dead) return false;
   const def = UNIT_DEFS[type];
-  if (!canAfford(def.cost)) { logMsg('موارد غير كافية لتدريب ' + def.name, 'bad'); return false; }
+  if (!canAfford(def.cost)) {
+    const miss = Object.keys(def.cost).filter(k => G.res_count[k] < def.cost[k]).map(k => RES_NAME[k]).join('، ');
+    logMsg('ينقصك: ' + miss + ' لتدريب ' + def.name, 'bad');
+    return false;
+  }
   if (b.team === 0 && G.pop >= G.popCap) { logMsg('السكان ممتلون — ابنِ بيتاً أكتر', 'bad'); return false; }
   payCost(def.cost);
   if (!b.queue.length) b.trainT = def.time;

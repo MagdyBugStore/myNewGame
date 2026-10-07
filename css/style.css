@@ -159,7 +159,7 @@ html, body {
 /* ---------- build bar ---------- */
 #buildbar {
   position:absolute; bottom:12px; right:50%; transform:translateX(50%);
-  display:flex; gap:6px; padding:7px; flex-wrap:wrap; justify-content:center;
+  display:flex; flex-direction:column; gap:6px; padding:7px; align-items:center;
   max-width:calc(100vw - 24px);
   background:rgba(14,16,22,.92);
   border:1px solid #5a4a2f; border-radius:10px;
@@ -284,3 +284,23 @@ html, body {
   font-size:16px; font-weight:700; padding:10px 30px; cursor:pointer;
 }
 #ovbtn:hover { filter:brightness(1.12); }
+
+/* ---------- build tabs ---------- */
+.btabs { display:flex; gap:6px; }
+.btab {
+  background:#1a1d25; border:1px solid #565c6b; color:#d9c9a3; border-radius:6px;
+  padding:3px 12px; font-size:12px; cursor:pointer;
+}
+.btab.on { background:#3a2f1a; border-color:#e0b759; color:#ffe9a8; }
+.bitems { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+
+/* ---------- economy widget ---------- */
+#econ { display:flex; align-items:center; gap:8px; font-size:12px; color:#d9c9a3; white-space:nowrap; }
+#econ b { color:#ffe9a8; margin:0 3px; }
+#e-pop.good { color:#9be28f; } #e-pop.mid { color:#f2d27a; } #e-pop.bad { color:#ff8a7a; }
+.e-ctl { background:rgba(255,255,255,.05); border:1px solid rgba(180,150,90,.35); border-radius:6px; padding:2px 4px; }
+.e-ctl button {
+  background:#2b2f3a; border:1px solid #565c6b; color:#f0e6d2; width:18px; height:18px;
+  border-radius:4px; cursor:pointer; line-height:14px; padding:0;
+}
+.e-ctl button:hover { border-color:#e0b759; }

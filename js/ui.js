@@ -8,13 +8,28 @@ function artHtml(key) {
   return (typeof ART !== 'undefined' && ART[key]) ? '<img class="portrait" src="' + ART[key] + '" alt="">' : '';
 }
 
-function initUI() {
+let _curCat = 0;
+
+function paintBuildBar() {
   const bar = document.getElementById('buildbar');
   bar.innerHTML = '';
-  BUILD_ORDER.forEach((key, i) => {
+  const tabs = document.createElement('div');
+  tabs.className = 'btabs';
+  BUILD_CATS.forEach((cat, ci) => {
+    const t = document.createElement('button');
+    t.className = 'btab' + (ci === _curCat ? ' on' : '');
+    t.innerHTML = cat.icon + ' ' + cat.name;
+    t.addEventListener('click', () => { sfx('click', 0.3); _curCat = ci; paintBuildBar(); });
+    tabs.appendChild(t);
+  });
+  bar.appendChild(tabs);
+
+  const items = document.createElement('div');
+  items.className = 'bitems';
+  BUILD_CATS[_curCat].items.forEach((key, i) => {
     const def = BUILD_DEFS[key];
     const el = document.createElement('button');
-    el.className = 'bbtn';
+    el.className = 'bbtn' + (G.placing === key ? ' active' : '');
     el.dataset.key = key;
     el.title = def.name + ' — ' + costText(def.cost);
     el.innerHTML =
@@ -29,8 +44,18 @@ function initUI() {
       if (G.placing === key) cancelPlacing();
       else startPlacing(key);
     });
-    bar.appendChild(el);
+    items.appendChild(el);
   });
+  bar.appendChild(items);
+}
+function cycleBuildCat() { _curCat = (_curCat + 1) % BUILD_CATS.length; paintBuildBar(); }
+function buildHotkey(n) {            // Shift+رقم → عنصر في التبويب الحالي
+  const key = BUILD_CATS[_curCat].items[n - 1];
+  if (key) startPlacing(key);
+}
+
+function initUI() {
+  paintBuildBar();
 
   document.getElementById('ovbtn').addEventListener('click', () => location.reload());
 
@@ -41,6 +66,25 @@ function initUI() {
   paint();
   snd.addEventListener('click', () => { G.sfxOn = !G.sfxOn; paint(); if (G.sfxOn) sfx('click', 0.4); });
   document.getElementById('topbar').appendChild(snd);
+
+  // لوحة الاقتصاد: شعبية + ضريبة + حصص
+  const econ = document.createElement('div');
+  econ.id = 'econ';
+  econ.innerHTML =
+    '<span id="e-pop" title="الشعبية: بتأثّر على الهجرة. فوق 30 يوصل فلاحين، تحت 15 بيهربوا">😊 <b id="e-popv">60</b>%</span>' +
+    '<span class="e-ctl" title="الضريبة: أعلى = ذهب أكتر وشعبية أقل"><button data-e="tax-">−</button>ضريبة <b id="e-tax">2</b><button data-e="tax+">+</button></span>' +
+    '<span class="e-ctl" title="الحصص: صفر = لا أكل (جوع/شعبية منهارة)"><button data-e="rat-">−</button>حصص <b id="e-rat">2</b><button data-e="rat+">+</button></span>';
+  document.getElementById('topbar').insertBefore(econ, document.getElementById('threat'));
+  econ.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const a = b.dataset.e;
+    if (a === 'tax-') G.tax = Math.max(0, G.tax - 1);
+    else if (a === 'tax+') G.tax = Math.min(5, G.tax + 1);
+    else if (a === 'rat-') G.rations = Math.max(0, G.rations - 1);
+    else if (a === 'rat+') G.rations = Math.min(3, G.rations + 1);
+    sfx('click', 0.3);
+  });
 }
 
 /* ------------------------------------------------------------
@@ -65,6 +109,15 @@ function updateHUD(dt) {
   set('r-iron', Math.floor(G.res_count.iron), G.res_count.iron < 10);
   set('r-gold', Math.floor(G.res_count.gold), G.res_count.gold < 30);
   set('r-pop', G.pop + '/' + G.popCap, G.pop >= G.popCap);
+
+  const pv = document.getElementById('e-popv');
+  if (pv) {
+    const v = Math.round(G.popularity);
+    pv.textContent = v;
+    pv.parentNode.className = v >= 50 ? 'good' : (v >= 30 ? 'mid' : 'bad');
+    document.getElementById('e-tax').textContent = G.tax;
+    document.getElementById('e-rat').textContent = G.rations;
+  }
 
   const t = Math.floor(G.time);
   document.getElementById('timer').textContent =
@@ -92,6 +145,13 @@ let _panelSig = '';
 function updatePanel() {
   const p = document.getElementById('panel');
   let sig = G.sel.map(o => o.id + ':' + Math.round(o.hp)).join(',') + '|' + G.sel.length;
+  if (G.sel.length === 1 && G.sel[0].def && !G.sel[0].type) {
+    const bb = G.sel[0];
+    if (bb.def.store) sig += '|s' + bb.def.store.map(k => Math.floor(G.res_count[k])).join(',');
+    if (bb.def.crop) sig += '|c' + Math.floor(bb.crop * 20);
+    if (bb.worker) sig += '|w' + bb.worker.state;
+  }
+  if (G.sel.length === 1 && G.sel[0].type) sig += '|u' + G.sel[0].state + (G.sel[0].carryN || 0);
   if (G.sel.length === 1 && G.sel[0].def && G.sel[0].def.train) {
     const b = G.sel[0];
     sig += '|q' + b.queue.length + ':' + Math.ceil(b.trainT) + ':' +
@@ -132,7 +192,11 @@ function updatePanel() {
     if (o.def.dmg) {
       state = o.target ? 'يقاتل' : (o.move ? 'في طريقه' : 'يقف في مكانه');
     } else {
-      const st = { idle: 'يبحث عن عمل', toRes: 'يذهب للمورد', gather: 'يجمع', toDrop: 'يسلّم', wait: 'ينتظر' };
+      const st = {
+        idle: o.job ? 'يجهّز للعمل' : 'عاطل — ينتظر وظيفة', toRes: 'ماشي للمورد', work: 'يشتغل',
+        toDrop: 'بيوصّل للمخزن', drop: 'بيفرّغ', wait: 'ينتظر', waitDrop: 'مفيش مكان للتسليم',
+        toStore: 'رايح المخزن يجيب خامة', take: 'بيشيل الخامة', toHome: 'راجع بالخامة'
+      };
       state = st[o.state] || o.state;
       if (o.carryN > 0) state += ' — يحمل ' + o.carryN + ' ' + RES_NAME[o.carry];
     }
@@ -155,6 +219,18 @@ function updatePanel() {
   html += '<div class="info">الصحة: ' + Math.ceil(b.hp) + ' / ' + b.maxHp;
   if (b.built < 1) html += '<br>جارٍ البناء… ' + Math.floor(b.built * 100) + '%';
   if (b.def.prod) html += '<br>ينتج: ' + RES_NAME[b.def.prod];
+  if (b.def.job) html += '<br>' + Object.keys(b.def.job.in).map(k => b.def.job.in[k] + ' ' + RES_NAME[k]).join(' + ') +
+    ' ← ' + b.def.job.amount + ' ' + RES_NAME[b.def.job.out];
+  if (b.def.crop) html += '<br>المحصول: ' + Math.floor(b.crop * 100) + '%';
+  if ((b.def.prod || b.def.job) && b.built >= 1) {
+    html += '<br>العامل: ' + (b.worker && !b.worker.dead ? '✔ موجود' : '✘ مفيش (استنى هجرة فلاح)');
+  }
+  if (b.def.store) {
+    html += '<br><b>المخزون:</b>';
+    b.def.store.forEach(k => {
+      html += '<br>' + RES_ICON[k] + ' ' + RES_NAME[k] + ': ' + Math.floor(G.res_count[k]) + ' / ' + storageCap(k, b.team);
+    });
+  }
   if (b.def.pop) html += '<br>سكان: +' + b.def.pop;
   html += '</div>';
 

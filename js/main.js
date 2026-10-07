@@ -35,9 +35,18 @@ function setupPlayer() {
   };
 
   put('house', 5, -1);
-  put('farm', -1, 5);
-  put('lumber', 6, 4);
   put('house', -2, -2);
+  put('lumber', 6, 4);
+  put('stockpile', 4, 5);
+  put('granary', -1, 5);
+  put('orchard', -3, 9);
+  put('armoury', 8, 0);
+
+  // فلاحين بيوصلوا في الأول (الباقي بيجي بالهجرة)
+  for (let i = 0; i < 5; i++) {
+    const s0 = freeTileNear(keep);
+    if (s0) spawnUnit('peasant', 0, s0.x + 0.5, s0.y + 0.5);
+  }
 
   // بداية الجيش
   const a = nearestFree(BO.x + 4, BO.y + 6, 8);
@@ -69,10 +78,10 @@ function init() {
   preloadArt();        // يبدأ تحميل صور الأرض/المباني (وتُخبز الأرض تاني لما تجهز)
   generateMap();
   G.bgrid = new Array(G.w * G.h).fill(null);
-  G.res_count = {
-    food: CFG.START_RES.food, wood: CFG.START_RES.wood,
-    stone: CFG.START_RES.stone, iron: CFG.START_RES.iron, gold: CFG.START_RES.gold
-  };
+  G.amax = G.amount.slice();              // الكمية الأصلية (لحجم الصخور المتناقص)
+  G.stump = new Uint8Array(G.w * G.h);
+  G.res_count = {};
+  for (const k of ITEM_KEYS) G.res_count[k] = CFG.START_RES[k] || 0;
 
   initInput();
   initUI();
@@ -112,16 +121,19 @@ function loop(ts) {
   G.fps = G.fps ? (G.fps * 0.92 + (1 / Math.max(dt, 0.0001)) * 0.08) : (1 / Math.max(dt, 0.0001));
 
   if (!G.gameOver) {
-    G.time += dt;
     updateCamera(dt);
-    updateEconomy(dt);
-    updateBuildings(dt);
-    updateUnits(dt);
-    updateProjectiles(dt);
-    updateEffects(dt);
-    updateHooks(dt);
-    updateAI(dt);
-    updatePop();
+    if (!G.paused) {
+      const sdt = dt * G.speed;
+      G.time += sdt;
+      updateEconomy(sdt);
+      updateBuildings(sdt);
+      updateUnits(sdt);
+      updateProjectiles(sdt);
+      updateEffects(sdt);
+      updateHooks(sdt);
+      updateAI(sdt);
+      updatePop();
+    }
   }
 
   render();

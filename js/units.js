@@ -17,19 +17,21 @@ function spawnUnit(type, team, x, y) {
     carry: 0, carryN: 0,
     cd: 0, repath: 0, scan: Math.random() * 0.3,
     target: null, move: null, manual: false,
-    flash: 0, dead: false
+    flash: 0, dead: false,
+    act: null, wt: 0, hits: 0, dropT: 0, atkT: -1, pend: null, face: 0, wander: 2 + Math.random() * 6
   };
   G.units.push(u);
   return u;
 }
 
-function killUnit(u) {
+function killUnit(u, silent) {
   if (u.dead) return;
   u.dead = true;
+  if (!silent) addCorpse(u);
   if (u.job && u.job.worker === u) { u.job.worker = null; u.job.retry = 0; }
   const si = G.sel.indexOf(u);
   if (si >= 0) G.sel.splice(si, 1);
-  addBurst(u.x, u.y, u.team === 0 ? '#5b8fd0' : '#d06a5b');
+  if (!silent) addBurst(u.x, u.y, u.team === 0 ? '#5b8fd0' : '#d06a5b', 0.4);
 }
 
 function hurtUnit(u, dmg) {
@@ -106,115 +108,279 @@ function setPath(u, path) {
 }
 
 /* ------------------------------------------------------------
-   منطق الفلاح
+   منطق الفلاح — رحلة المنتج كاملة
+   الحصاد : idle → toRes → work(ضربات) → [toDrop → drop] → idle
+   التحويل: idle → toStore → take → toHome → work → [toDrop → drop] → idle
    ------------------------------------------------------------ */
+function workerTool(u) {
+  const sp = CHAR[unitKind(u)];
+  return sp && sp.tool ? sp.tool : 'hammer';
+}
+
+function endWork(u) { u.act = null; u.wt = 0; u.hits = 0; }
+
+/** يوصّل المورد اللي بيشيله لأقرب مخزن مناسب */
+function startDelivery(u) {
+  const dest = nearestStorage(u.x, u.y, u.team, u.carry, true);
+  if (!dest) {
+    if (!nearestStorage(u.x, u.y, u.team, u.carry, false)) {
+      if (!G._warnStore || G.time - G._warnStore > 25) {
+        G._warnStore = G.time;
+        const kd = BUILD_DEFS[storeKindOf(u.carry)];
+        logMsg('ابنِ ' + (kd ? kd.name : 'مخزن') + ' — العمال شايلين ' + RES_NAME[u.carry] + ' ومفيش مكان يسلّموه', 'bad');
+      }
+    } else if (!G._warnFull || G.time - G._warnFull > 25) {
+      G._warnFull = G.time;
+      logMsg('المخزن ممتلئ بـ ' + RES_NAME[u.carry] + ' — ابنِ مخزن تاني', 'bad');
+    }
+    u.state = 'waitDrop'; u.timer = 2;
+    return;
+  }
+  const p = pathToBuildingEdge(u.x, u.y, dest);
+  if (!p && p !== []) { u.state = 'waitDrop'; u.timer = 2; return; }
+  u.dest = dest;
+  setPath(u, p);
+  u.state = 'toDrop';
+}
+
+/** تأثير الضربة (الخشب يتطاير، الحجر يتفتت…) */
+function workHit(u) {
+  const tool = workerTool(u);
+  const r = u.res;
+  if (tool === 'axe') {
+    if (r && r.kind === 'tile') { if (!G.shake) G.shake = new Map(); G.shake.set(idx(r.x, r.y), 0.45); }
+    addChips(u.x + 0.3, u.y + 0.3, '#d9b27a');
+    sfx('chop', 0.3, 260);
+  } else if (tool === 'pick') {
+    addChips(r ? r.x + 0.5 : u.x, r ? r.y + 0.5 : u.y, '#b9b4aa');
+    sfx('sword', 0.12, 300);
+  } else if (tool === 'hoe') {
+    addChips(r ? r.x + 0.5 : u.x, r ? r.y + 0.5 : u.y, '#8a6b3d');
+  } else {
+    addChips(u.x + 0.2, u.y + 0.2, '#e8d9a8');
+    sfx('click', 0.15, 300);
+  }
+}
+
 function updateWorker(u, dt) {
   u.repath -= dt;
 
   if (u.manual) {
+    u.act = null;
     if (moveUnit(u, dt)) u.manual = false;
     return;
   }
 
   const b = u.job;
   if (!b || b.dead) {
-    // المبنى راح — دور على مبنى تاني
+    // عاطل: يتمشى حوالين القلعة لحد ما مبنى يطلبه
     u.job = null;
-    u.timer -= dt;
-    if (u.timer <= 0) {
-      u.timer = 2;
-      let best = null, bestD = 1e9;
-      for (const ob of G.buildings) {
-        if (ob.dead || ob.team !== u.team || !ob.def.prod) continue;
-        if (ob.worker && !ob.worker.dead) continue;
-        const d = Math.hypot(ob.x - u.x, ob.y - u.y);
-        if (d < bestD) { bestD = d; best = ob; }
+    u.act = null;
+    if (u.carryN > 0 && u.state !== 'toDrop' && u.state !== 'drop' && u.state !== 'waitDrop') { u.carry = 0; u.carryN = 0; }
+    if (u.path) { moveUnit(u, dt); return; }
+    u.wander -= dt;
+    if (u.wander <= 0) {
+      u.wander = 4 + Math.random() * 8;
+      const keep = G.playerKeep && !G.playerKeep.dead ? G.playerKeep : null;
+      if (keep && u.team === 0) {
+        const tx = keep.x + keep.w / 2 + (Math.random() - 0.5) * 9;
+        const ty = keep.y + keep.h + 1 + Math.random() * 4;
+        const t = nearestWalkable(Math.floor(tx), Math.floor(ty), 4);
+        if (t) setPath(u, pathToTile(u.x, u.y, t.x, t.y));
       }
-      if (best) attachJob(u, best);
     }
     return;
   }
 
+  // المبنى لسه بيتبني: يروح يستنى جنبه
   if (!b.built) {
     if (u.repath <= 0) {
       u.repath = 0.9;
       const info = distToBuilding(u.x, u.y, b);
       if (info.d > 1.4) setPath(u, pathToBuildingEdge(u.x, u.y, b));
     }
-    moveUnit(u, dt);
+    if (u.path) moveUnit(u, dt);
+    else { u.act = 'work'; u.wt += dt; faceToward(u, b.x + b.w / 2, b.y + b.h / 2); if (u.wt > 0.75) u.wt -= 0.75; }
     return;
   }
 
-  if (u.state === 'wait') {
+  const job = b.def.job;           // مبنى تحويل؟
+  const tool = workerTool(u);
+  const cyc = WORK_DUR[tool] || 1;
+
+  if (u.state === 'wait' || u.state === 'waitDrop') {
+    u.act = null;
     u.timer -= dt;
-    if (u.timer <= 0) { u.state = 'idle'; u.res = null; u.tried = null; }
+    if (u.timer <= 0) {
+      if (u.state === 'waitDrop') { u.state = 'idle'; }
+      else { u.state = 'idle'; u.res = null; u.tried = null; }
+    }
     return;
   }
 
+  /* ---------------- idle: اختار المهمة ---------------- */
   if (u.state === 'idle') {
-    if (!u.res) u.res = findResourceSpot(b, u.tried);
-    if (!u.res) { u.state = 'wait'; u.timer = 2.5; return; }
-    const p = pathToResource(u, u.res);
-    if (!p && p !== []) {           // مفيش مسار
-      u.tried = u.res; u.res = null;
-      u.state = 'wait'; u.timer = 2;
+    u.act = null;
+    if (u.carryN > 0) { startDelivery(u); return; }
+
+    if (job) {
+      const item = Object.keys(job.in)[0], need = job.in[item];
+      if (G.res_count[item] < need) { u.state = 'wait'; u.timer = 2.5; return; }
+      if (storageRoom(job.out, u.team) <= 0 && nearestStorage(u.x, u.y, u.team, job.out, false)) { u.state = 'wait'; u.timer = 2.5; return; }
+      const st = nearestStorage(u.x, u.y, u.team, item, false);
+      if (!st) { u.state = 'wait'; u.timer = 3; return; }
+      const p = pathToBuildingEdge(u.x, u.y, st);
+      if (!p && p !== []) { u.state = 'wait'; u.timer = 2; return; }
+      u.dest = st; setPath(u, p);
+      u.state = 'toStore';
       return;
     }
+
+    if (!u.res) u.res = findResourceSpot(b, u.tried);
+    if (!u.res) { u.state = 'wait'; u.timer = 2.5; return; }
+    // المخزن ممتلئ: متتعبش نفسك
+    if (b.def.prod && storageRoom(b.def.prod, u.team) <= 0 && nearestStorage(u.x, u.y, u.team, b.def.prod, false)) {
+      u.state = 'wait'; u.timer = 3; return;
+    }
+    const p = pathToResource(u, u.res);
+    if (!p && p !== []) { u.tried = u.res; u.res = null; u.state = 'wait'; u.timer = 2; return; }
     setPath(u, p);
     u.state = 'toRes';
     return;
   }
 
+  /* ---------------- ماشي للمورد ---------------- */
   if (u.state === 'toRes') {
-    if (moveUnit(u, dt)) { u.state = 'gather'; u.timer = b.def.gather; }
+    if (moveUnit(u, dt)) {
+      u.state = 'work';
+      const total = b.def.gather || 3;
+      u.act = 'work'; u.wt = 0; u.hits = 0; u.needHits = Math.max(2, Math.round(total / cyc));
+      if (u.res) faceToward(u, u.res.x + 0.5, u.res.y + 0.5);
+    }
     return;
   }
 
-  if (u.state === 'gather') {
-    if (b.dead) { u.state = 'idle'; return; }
-    if (u.res && u.res.kind === 'tile') {
-      const k = idx(u.res.x, u.res.y);
-      if (G.res[k] === 0) { u.state = 'idle'; u.res = null; return; }
+  /* ---------------- ماشي لمخزن علشان ياخد خامة ---------------- */
+  if (u.state === 'toStore') {
+    if (u.dest && u.dest.dead) { u.state = 'idle'; return; }
+    if (moveUnit(u, dt)) {
+      u.state = 'take'; u.timer = 0.5; u.act = null;
+      if (u.dest) faceToward(u, u.dest.x + u.dest.w / 2, u.dest.y + u.dest.h / 2);
     }
+    return;
+  }
+  if (u.state === 'take') {
     u.timer -= dt;
     if (u.timer > 0) return;
-
-    let prod = b.def.prod, n = b.def.amount;
-    if (u.res && u.res.kind === 'tile') {
-      const k = idx(u.res.x, u.res.y);
-      const rt = G.res[k];
-      if (rt) {
-        n = Math.min(n, G.amount[k]);
-        prod = (rt === TER.TREE) ? 'wood' : (rt === TER.ROCK) ? 'stone' : 'iron';
-        G.amount[k] -= n;
-        if (G.amount[k] <= 0) { G.res[k] = 0; G.amount[k] = 0; u.res = null; }
-      } else { u.res = null; n = 0; }
-    }
-    if (n <= 0) { u.state = 'idle'; return; }
-
-    u.carry = prod;
-    u.carryN = n;
-    const drop = nearestDrop(u.x, u.y, u.team);
-    if (!drop) { u.state = 'wait'; u.timer = 2; u.carry = 0; u.carryN = 0; return; }
-    const p = pathToBuildingEdge(u.x, u.y, drop);
-    if (!p && p !== []) { u.state = 'wait'; u.timer = 2; u.carry = 0; u.carryN = 0; return; }
+    const item = Object.keys(job.in)[0], need = job.in[item];
+    if (G.res_count[item] < need) { u.state = 'wait'; u.timer = 2; return; }   // حد سبقه
+    G.res_count[item] -= need;
+    u.carry = item; u.carryN = need;
+    const p = pathToBuildingEdge(u.x, u.y, b);
+    if (!p && p !== []) { G.res_count[item] += need; u.carry = 0; u.carryN = 0; u.state = 'wait'; u.timer = 2; return; }
     setPath(u, p);
-    u.state = 'toDrop';
+    u.state = 'toHome';
     return;
   }
-
-  if (u.state === 'toDrop') {
+  if (u.state === 'toHome') {
     if (moveUnit(u, dt)) {
-      if (u.carryN > 0) {
-        G.res_count[u.carry] += u.carryN;
-        sfx('chop', 0.3, 500);
-        if (u.team === 0) addFloat(u.x, u.y, '+' + u.carryN + ' ' + RES_NAME[u.carry], '#ffe9a8');
-      }
-      u.carry = 0; u.carryN = 0;
-      u.state = 'idle';
+      u.state = 'work';
+      u.act = 'work'; u.wt = 0; u.hits = 0; u.needHits = Math.max(3, Math.round(job.work / cyc));
+      u.carry = 0; u.carryN = 0;              // الخامة دخلت المبنى
+      faceToward(u, b.x + b.w / 2, b.y + b.h / 2);
     }
     return;
   }
+
+  /* ---------------- الشغل (ضربات) ---------------- */
+  if (u.state === 'work') {
+    const r = u.res;
+    if (!job && r && r.kind === 'tile' && G.res[idx(r.x, r.y)] === 0) { endWork(u); u.state = 'idle'; u.res = null; return; }
+    const hitAt = (WORK_HIT[tool] || 0.55) * cyc;
+    const prev = u.wt;
+    u.wt += dt;
+    if (prev < hitAt && u.wt >= hitAt) { u.hits++; workHit(u); }
+    if (u.wt >= cyc) u.wt -= cyc;
+    // نخلّص بعد آخر ضربة بجزء من الحركة
+    if (u.hits >= u.needHits && u.wt >= hitAt + 0.12 * cyc) finishWork(u, b, job);
+    return;
+  }
+
+  /* ---------------- ماشي بالحمولة للمخزن ---------------- */
+  if (u.state === 'toDrop') {
+    u.act = null;
+    if (u.dest && u.dest.dead) { startDelivery(u); return; }
+    if (moveUnit(u, dt)) {
+      u.state = 'drop'; u.act = 'drop'; u.dropT = 0;
+      if (u.dest) faceToward(u, u.dest.x + u.dest.w / 2, u.dest.y + u.dest.h / 2);
+    }
+    return;
+  }
+
+  /* ---------------- تفريغ ---------------- */
+  if (u.state === 'drop') {
+    u.dropT += dt;
+    if (u.dropT < 0.6) return;
+    if (u.carryN > 0) {
+      const room = storageRoom(u.carry, u.team);
+      const put = room > 0 ? Math.min(u.carryN, room) : 0;
+      G.res_count[u.carry] += put;
+      if (put > 0) {
+        sfx('click', 0.2, 250);
+        if (u.team === 0) addFloat(u.x, u.y, '+' + put + ' ' + RES_NAME[u.carry], '#ffe9a8');
+      }
+      if (put < u.carryN) { u.carryN -= put; u.act = null; u.state = 'waitDrop'; u.timer = 1.5; return; }
+    }
+    u.carry = 0; u.carryN = 0;
+    u.act = null; u.dropT = 0; u.dest = null;
+    u.state = 'idle';
+    return;
+  }
+
+  u.state = 'idle';
+}
+
+/** نهاية دورة الشغل: الناتج يتحمّل على العامل */
+function finishWork(u, b, job) {
+  endWork(u);
+  const def = b.def;
+  if (job) {
+    u.carry = job.out; u.carryN = job.amount;
+    startDelivery(u);
+    return;
+  }
+  let prod = def.prod, n = def.amount;
+  if (def.crop) {
+    if (b.crop >= 1) { b.crop = 0.18; }
+    else { b.crop = Math.min(1, b.crop + 0.12); u.state = 'idle'; u.res = null; return; }
+  } else if (u.res && u.res.kind === 'tile') {
+    const k = idx(u.res.x, u.res.y);
+    const rt = G.res[k];
+    if (!rt) { u.res = null; u.state = 'idle'; return; }
+    n = Math.min(n, G.amount[k]);
+    prod = (rt === TER.TREE) ? 'wood' : (rt === TER.ROCK) ? 'stone' : 'iron';
+    G.amount[k] -= n;
+    if (G.amount[k] <= 0) { depleteTile(u.res.x, u.res.y, rt); u.res = null; }
+  }
+  if (n <= 0) { u.state = 'idle'; return; }
+  u.carry = prod; u.carryN = n;
+  startDelivery(u);
+}
+
+/** مورد خلص: شجرة تقع (جذع يفضل) / صخرة تتفتت ويتفتح المكان */
+function depleteTile(x, y, rt) {
+  const k = idx(x, y);
+  G.res[k] = 0; G.amount[k] = 0;
+  if (rt === TER.TREE) {
+    if (!G.stump) G.stump = new Uint8Array(G.w * G.h);
+    G.stump[k] = 1;
+    G.effects.push({ kind: 'fall', x: x, y: y, t: 0, life: 1.0, seed: hash2(x, y) });
+    sfx('wreck', 0.25, 400);
+  } else {
+    G.blocked[k] = 0;
+    for (let i = 0; i < 5; i++) addChips(x + 0.5, y + 0.5, i % 2 ? '#b9b4aa' : '#8f8a81');
+  }
+  if (typeof buildMinimapBase === 'function' && G.mmBase) buildMinimapBase();
 }
 
 /* ------------------------------------------------------------
@@ -225,6 +391,7 @@ function updateSoldier(u, dt) {
   u.repath -= dt;
   u.scan -= dt;
   if (u.flash > 0) u.flash -= dt;
+  tickAttack(u, dt);
 
   if (u.target && (u.target.kind === 'unit' ? u.target.ref.dead : u.target.ref.dead)) {
     u.target = null;
@@ -268,13 +435,13 @@ function combat(u, dt) {
 
   if (dist <= range) {
     u.path = null; u.pathIdx = 0;
-    if (u.cd <= 0) {
-      u.cd = def.cd;
-      if (def.proj) spawnShot(u, t);
-      else { applyDamage(t, def.dmg); sfx('sword', 0.35, 180); }
-    }
+    faceToward(u, tx, ty);
+    if (u.cd <= 0 && u.atkT < 0) startAttack(u, t);
     return;
   }
+
+  // بيضرب دلوقتي؟ مايتحركش لحد ما الحركة تخلص
+  if (u.atkT >= 0) return;
 
   if (u.repath <= 0) {
     u.repath = 0.7 + Math.random() * 0.4;
@@ -287,15 +454,42 @@ function combat(u, dt) {
     }
     if (!p && p !== []) {
       // مفيش مسار — لو قريب اضرب مباشرة
-      if (dist <= range + 1.0 && u.cd <= 0) {
-        u.cd = def.cd;
-        if (def.proj) spawnShot(u, t); else applyDamage(t, def.dmg);
-      }
+      if (dist <= range + 1.0 && u.cd <= 0) startAttack(u, t);
       return;
     }
     setPath(u, p);
   }
   moveUnit(u, dt);
+}
+
+/** بداية حركة الضرب: الضرر/السهم بيطلع عند لحظة الـ hit في الأنيميشن */
+function startAttack(u, t) {
+  const spec = CHAR[u.type] || CHAR.swordsman;
+  u.cd = u.def.cd;
+  u.atkT = 0;
+  u.pend = { t: (ATK_HIT[spec.tool] || 0.5) * (ATK_DUR[spec.tool] || 0.6), target: t };
+}
+
+/** تحديث مؤقّت الضرب */
+function tickAttack(u, dt) {
+  if (u.atkT < 0) return;
+  const spec = CHAR[u.type] || CHAR.swordsman;
+  u.atkT += dt;
+  if (u.pend && u.atkT >= u.pend.t) {
+    const t = u.pend.target;
+    u.pend = null;
+    const alive = t && t.ref && !t.ref.dead;
+    if (alive) {
+      if (u.def.proj) spawnShot(u, t);
+      else {
+        // لسه في مدى الضرب؟
+        let d;
+        if (t.kind === 'building') d = distToBuilding(u.x, u.y, t.ref).d; else d = Math.hypot(t.ref.x - u.x, t.ref.y - u.y);
+        if (d <= u.def.range + 1.1) { applyDamage(t, u.def.dmg); sfx('sword', 0.35, 180); }
+      }
+    }
+  }
+  if (u.atkT >= (ATK_DUR[spec.tool] || 0.6)) { u.atkT = -1; u.pend = null; }
 }
 
 function spawnShot(u, t) {
@@ -347,7 +541,20 @@ function addFloat(x, y, text, color) {
 function addBurst(x, y, color, life) {
   G.effects.push({ kind: 'burst', x: x, y: y, color: color, t: 0, life: life || 0.6 });
 }
+/** رقاقات/شظايا صغيرة بتطير (ضربة فأس، حجر يتفتت…) */
+function addChips(x, y, color) {
+  for (let i = 0; i < 4; i++) {
+    G.effects.push({
+      kind: 'chip', x: x, y: y, t: 0, life: 0.5 + Math.random() * 0.3, color: color,
+      vx: (Math.random() - 0.5) * 2.4, vy: (Math.random() - 0.5) * 1.4, vz: 14 + Math.random() * 10
+    });
+  }
+}
 function updateEffects(dt) {
+  if (G.shake && G.shake.size) {
+    for (const [k, v] of G.shake) { if (v - dt <= 0) G.shake.delete(k); else G.shake.set(k, v - dt); }
+  }
+  updateRubble(dt);
   for (const e of G.effects) e.t += dt;
   G.effects = G.effects.filter(e => e.t < e.life);
 }
@@ -370,7 +577,9 @@ function updateUnits(dt) {
 
     if (u.def.dmg) updateSoldier(u, dt);
     else updateWorker(u, dt);
+    animTick(u, dt);
   }
+  updateCorpses(dt);
   if (G.units.some(u => u.dead)) {
     G.units = G.units.filter(u => !u.dead);
   }

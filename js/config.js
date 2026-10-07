@@ -5,12 +5,13 @@
    ============================================================ */
 
 const CFG = {
-  TW: 64, TH: 32, HW: 32, HH: 16,        // مقاس البلاطة Iso
+  TW: 60, TH: 32, HW: 30, HH: 16,        // مقاس البلاطة Iso
   MAP_W: 64, MAP_H: 64,
   ZOOM_MIN: 0.45, ZOOM_MAX: 1.8,
-  START_RES: { food: 400, wood: 400, stone: 200, iron: 0, gold: 300 },
-  TAX_POP: 0.14,     // ضريبة السكان → ذهب/ثانية
-  TAX_HOUSE: 0.16,   // ضريبة كل بيت → ذهب/ثانية
+  START_RES: { food: 400, wood: 400, stone: 200, iron: 0, gold: 300,
+               wheat: 0, flour: 0, sword: 6, bow: 6, spear: 0 },
+  TAX_PER: 0.035,    // ذهب/ثانية لكل فلاح عن كل مستوى ضريبة (0..5)
+  EAT: 0.012,        // استهلاك الطعام/ثانية لكل فرد عند الحصة العادية
   CAM_SPEED: 950,    // سرعة حركة الكاميرا (بكسل/ثانية)
   AGGRO: 4.5         // مدى كشف العدو عند الوقوف
 };
@@ -28,43 +29,99 @@ function hash2(x, y) {
 }
 
 const RES_KEYS = ['food', 'wood', 'stone', 'iron', 'gold'];
-const RES_NAME = { food: 'طعام', wood: 'خشب', stone: 'حجر', iron: 'حديد', gold: 'ذهب' };
-const RES_ICON = { food: '🌾', wood: '🪵', stone: '🪨', iron: '⛏️', gold: '🪙' };
+const RES_NAME = { food: 'طعام', wood: 'خشب', stone: 'حجر', iron: 'حديد', gold: 'ذهب',
+                   wheat: 'قمح', flour: 'دقيق', sword: 'سيف', bow: 'قوس', spear: 'رمح' };
+const RES_ICON = { food: '🍞', wood: '🪵', stone: '🪨', iron: '⛏️', gold: '🪙',
+                   wheat: '🌾', flour: '🥣', sword: '🗡️', bow: '🏹', spear: '🔱' };
+/* كل الأصناف اللي بتتخزّن في G.res_count */
+const ITEM_KEYS = ['food', 'wood', 'stone', 'iron', 'gold', 'wheat', 'flour', 'sword', 'bow', 'spear'];
 
-/* ---------- تعريف المباني ---------- */
+/* ---------- تعريف المباني ----------
+   prod/gather/amount : الإنتاج المباشر (حصاد من الأرض)
+   job.in/out         : التحويل (مطحنة/مخبز/صانع أسلحة): العامل يجيب الخامة من المخزن
+   dest               : نوع المخزن اللي العامل بيوصّل له
+   store/cap          : المبنى مخزن لأصناف معيّنة (السعة لكل صنف)
+   walk               : بلاطاته مفتوحة للمشي (حقول/مخازن مكشوفة)
+   charKind           : شكل العامل (anim.js)
+---------------------------------------------------------- */
 const BUILD_DEFS = {
   keep: {
     key: 'keep', name: 'القلعة', w: 4, h: 4, hp: 7000, height: 56, roof: 34,
-    cost: {}, time: 0, icon: '🏰', pop: 10, drop: true
+    cost: {}, time: 0, icon: '🏰', pop: 10
   },
   house: {
     key: 'house', name: 'بيت', w: 2, h: 2, hp: 480, height: 26, roof: 22,
     cost: { wood: 40 }, time: 6, icon: '🏠', pop: 8
   },
+  stockpile: {
+    key: 'stockpile', name: 'مخزن مواد', w: 6, h: 4, hp: 700, height: 6, roof: 0,
+    cost: { wood: 30 }, time: 5, icon: '📦', walk: true,
+    store: ['wood', 'stone', 'iron', 'wheat', 'flour'], cap: 500
+  },
+  granary: {
+    key: 'granary', name: 'مخزن غلال', w: 3, h: 3, hp: 900, height: 34, roof: 22,
+    cost: { wood: 50 }, time: 8, icon: '🏚️',
+    store: ['food'], cap: 500
+  },
+  armoury: {
+    key: 'armoury', name: 'مخزن أسلحة', w: 2, h: 2, hp: 900, height: 30, roof: 18,
+    cost: { wood: 60 }, time: 8, icon: '🛡️',
+    store: ['sword', 'bow', 'spear'], cap: 100
+  },
   farm: {
-    key: 'farm', name: 'مزرعة', w: 3, h: 3, hp: 520, height: 12, roof: 0,
-    cost: { wood: 50 }, time: 8, icon: '🌾',
-    prod: 'food', work: 3.0, amount: 9, gather: 3.0
+    key: 'farm', name: 'مزرعة قمح', w: 4, h: 4, hp: 520, height: 12, roof: 0,
+    cost: { wood: 50 }, time: 8, icon: '🌾', walk: true, crop: true,
+    prod: 'wheat', gather: 3.2, amount: 10, grow: 26, dest: 'stockpile', charKind: 'farmer'
+  },
+  orchard: {
+    key: 'orchard', name: 'بستان تفاح', w: 4, h: 4, hp: 480, height: 12, roof: 0,
+    cost: { wood: 60 }, time: 8, icon: '🍎', walk: true, crop: true,
+    prod: 'food', gather: 3.0, amount: 8, grow: 20, dest: 'granary', charKind: 'farmer'
   },
   lumber: {
     key: 'lumber', name: 'منشرة خشب', w: 2, h: 2, hp: 420, height: 24, roof: 16,
     cost: { wood: 40 }, time: 6, icon: '🪓',
-    prod: 'wood', req: TER.TREE, work: 3.5, amount: 10, gather: 3.5
+    prod: 'wood', req: TER.TREE, gather: 3.6, amount: 10, dest: 'stockpile', charKind: 'woodcutter'
   },
   quarry: {
     key: 'quarry', name: 'محجر حجر', w: 3, h: 3, hp: 560, height: 16, roof: 0,
     cost: { wood: 60 }, time: 9, icon: '⛏️',
-    prod: 'stone', req: TER.ROCK, work: 4.0, amount: 8, gather: 4.0
+    prod: 'stone', req: TER.ROCK, gather: 4.0, amount: 8, dest: 'stockpile', charKind: 'quarrier'
   },
   mine: {
     key: 'mine', name: 'منجم حديد', w: 3, h: 3, hp: 620, height: 20, roof: 14,
     cost: { wood: 100, stone: 40 }, time: 12, icon: '⚒️',
-    prod: 'iron', req: TER.IRON, work: 4.5, amount: 6, gather: 4.5
+    prod: 'iron', req: TER.IRON, gather: 4.5, amount: 6, dest: 'stockpile', charKind: 'miner'
+  },
+  mill: {
+    key: 'mill', name: 'مطحنة', w: 2, h: 2, hp: 600, height: 40, roof: 16,
+    cost: { wood: 80 }, time: 10, icon: '🌬️', charKind: 'worker',
+    job: { in: { wheat: 4 }, out: 'flour', amount: 4, work: 3.0, dest: 'stockpile' }
+  },
+  bakery: {
+    key: 'bakery', name: 'مخبز', w: 2, h: 2, hp: 500, height: 28, roof: 20,
+    cost: { wood: 70, stone: 20 }, time: 9, icon: '🥖', charKind: 'baker',
+    job: { in: { flour: 4 }, out: 'food', amount: 9, work: 3.0, dest: 'granary' }
+  },
+  fletcher: {
+    key: 'fletcher', name: 'صانع أقواس', w: 2, h: 2, hp: 500, height: 28, roof: 20,
+    cost: { wood: 80 }, time: 9, icon: '🏹', charKind: 'worker',
+    job: { in: { wood: 3 }, out: 'bow', amount: 2, work: 3.2, dest: 'armoury' }
+  },
+  poleturner: {
+    key: 'poleturner', name: 'صانع رماح', w: 2, h: 2, hp: 500, height: 28, roof: 20,
+    cost: { wood: 80 }, time: 9, icon: '🔱', charKind: 'worker',
+    job: { in: { wood: 3 }, out: 'spear', amount: 2, work: 3.2, dest: 'armoury' }
+  },
+  blacksmith: {
+    key: 'blacksmith', name: 'حدّاد', w: 2, h: 2, hp: 700, height: 28, roof: 20,
+    cost: { wood: 80, stone: 30 }, time: 10, icon: '🔨', charKind: 'smith',
+    job: { in: { iron: 3 }, out: 'sword', amount: 2, work: 3.4, dest: 'armoury' }
   },
   barracks: {
     key: 'barracks', name: 'ثكنة', w: 3, h: 3, hp: 1400, height: 38, roof: 26,
     cost: { wood: 120, stone: 80 }, time: 14, icon: '⚔️',
-    train: ['swordsman', 'archer']
+    train: ['swordsman', 'archer', 'spearman']
   },
   wall: {
     key: 'wall', name: 'سور', w: 1, h: 1, hp: 1000, height: 30, roof: 0,
@@ -76,7 +133,24 @@ const BUILD_DEFS = {
     attack: { range: 6.5, dmg: 16, cd: 1.15 }
   }
 };
-const BUILD_ORDER = ['house', 'farm', 'lumber', 'quarry', 'mine', 'barracks', 'wall', 'tower'];
+
+/* مقاس المبنى (بلاطات) والارتفاع من sprite SHC لو موجود (js/spr.js) */
+if (typeof SPR_B !== 'undefined') {
+  for (const k in SPR_B) {
+    const d = BUILD_DEFS[k], m = SPR_B[k];
+    if (!d) continue;
+    d.w = d.h = m.n;
+    d.height = Math.max(20, Math.round((m.v[0].ay - m.n * 8) * 2));
+  }
+}
+
+/* قوائم البناء (زي قوائم Stronghold): تبويبات */
+const BUILD_CATS = [
+  { key: 'town', name: 'المدينة', icon: '🏘️', items: ['house', 'stockpile', 'granary', 'armoury'] },
+  { key: 'eco', name: 'الاقتصاد', icon: '🌾', items: ['lumber', 'quarry', 'mine', 'farm', 'orchard', 'mill', 'bakery'] },
+  { key: 'war', name: 'الحرب', icon: '⚔️', items: ['barracks', 'fletcher', 'poleturner', 'blacksmith', 'wall', 'tower'] }
+];
+const BUILD_ORDER = [].concat.apply([], BUILD_CATS.map(c => c.items));
 
 /* ---------- تعريف الوحدات ---------- */
 const UNIT_DEFS = {
@@ -87,12 +161,17 @@ const UNIT_DEFS = {
   swordsman: {
     key: 'swordsman', name: 'جندي سيف', hp: 175, speed: 2.8, r: 9, icon: '🛡️',
     dmg: 17, range: 0.95, cd: 1.0, melee: true,
-    cost: { food: 40, gold: 20 }, time: 8
+    cost: { sword: 1, gold: 20 }, time: 8
+  },
+  spearman: {
+    key: 'spearman', name: 'رمّاح', hp: 150, speed: 2.9, r: 9, icon: '🔱',
+    dmg: 14, range: 1.5, cd: 1.05, melee: true,
+    cost: { spear: 1, gold: 18 }, time: 7
   },
   archer: {
     key: 'archer', name: 'رامي سهام', hp: 95, speed: 3.0, r: 8, icon: '🏹',
     dmg: 14, range: 4.6, cd: 1.5, proj: 'arrow',
-    cost: { wood: 30, gold: 15 }, time: 6
+    cost: { bow: 1, gold: 15 }, time: 6
   },
   // نسخة العدو
   esword: {
@@ -130,6 +209,8 @@ const G = {
   gameOver: 0,        // 0 = شغال ، 1 = رابح ، 2 = خسر
   enemy: null,
 
+  tax: 2, rations: 2, popularity: 60, immT: 6, // اقتصاد: ضريبة (0..5) / حصص (0..3) / شعبية
+  speed: 1, paused: false, corpses: [], rubble: [],
   hooks: [],          // مؤقّتات سكربتات اللاعب (api.every / api.once)
   logs: [],           // سجل رسائل اللعبة (بستخدمه أوامر CLI: logs / state)
   fps: 0,

@@ -1,0 +1,8 @@
+<meta charset="utf-8"><body style="background:#4a7a3a;margin:0"><canvas id=c width=1200 height=700></canvas>
+<script src="../js/spr.js"></script><script>
+const c=document.getElementById('c').getContext('2d');const lab=['S','SW','W','NW','N','NE','E','SE'];
+const SPR_DIR=(window.SD=[4,5,6,7,0,1,2,3]);
+const kinds=['swordsman','spearman','archer','peasant'];
+kinds.forEach((k,r)=>{const v=SPR_U[k][0];const im=new Image();im.onload=()=>{for(let g=0;g<8;g++){
+ c.drawImage(im,0,SPR_DIR[g]*v.ch,v.cw,v.ch,g*140+30,r*170+20,v.cw*1.5,v.ch*1.5);c.fillStyle='#ff0';c.font='16px sans-serif';c.fillText(g+':'+lab[g],g*140+40,r*170+160);}};im.src=v.src;});
+</script>

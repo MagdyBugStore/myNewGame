@@ -262,6 +262,7 @@ function fireWaveHook(n, made) {
    ============================================================ */
 const TEAM_TAG = t => (t === 0 ? 'me' : 'foe');
 const STATE_TXT = {
+  work: 'work', drop: 'unloading', toStore: 'to-store', take: 'taking', toHome: 'to-home', waitDrop: 'wait-drop',
   idle: 'idle', wait: 'wait', toRes: 'to-res', gather: 'gather',
   toDrop: 'returning', toRes2: 'to-res'
 };

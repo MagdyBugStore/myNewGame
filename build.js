@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = __dirname;
-const JS_FILES = ['art', 'sfx', 'config', 'map', 'buildings', 'units', 'ai', 'render', 'input', 'ui', 'console', 'main'];
+const JS_FILES = ['art', 'spr', 'sfx', 'config', 'anim', 'map', 'buildings', 'units', 'ai', 'render', 'bldfx', 'input', 'ui', 'console', 'main'];
 
 const css = fs.readFileSync(path.join(ROOT, 'css', 'style.css'), 'utf8');
 const js = JS_FILES
@@ -32,7 +32,7 @@ ${css}
 
 <div id="hud">
   <div id="topbar">
-    <div class="res" id="r-food"><i>🌾</i><b>طعام</b><em>0</em></div>
+    <div class="res" id="r-food"><i>🍞</i><b>طعام</b><em>0</em></div>
     <div class="res" id="r-wood"><i>🪵</i><b>خشب</b><em>0</em></div>
     <div class="res" id="r-stone"><i>🪨</i><b>حجر</b><em>0</em></div>
     <div class="res" id="r-iron"><i>⛏️</i><b>حديد</b><em>0</em></div>
