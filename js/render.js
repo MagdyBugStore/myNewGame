@@ -45,9 +45,11 @@ function preloadArt() {
 /* لو البلاطات اتحمّلت (أو فشلت) → أعد خَبز الأرض مرة واحدة */
 function tilesDirtyCheck() {
   if (!G._tilesDirty) return;
-  for (let i = 0; i < 4; i++) {
-    const a = artImg('t_sand' + i), b = artImg('t_grass' + i);
-    if ((a && !a.complete) || (b && !b.complete)) return;
+  for (const fam of ['t_sand', 't_grass', 't_gmed', 't_dirt']) {
+    for (let i = 0; i < 4; i++) {
+      const a = artImg(fam + i);
+      if (a && !a.complete) return;
+    }
   }
   buildTerrainBake();
   G._tilesDirty = false;
@@ -96,23 +98,33 @@ function bakeTile(c, x, y, OX) {
   c.closePath();
 
   let col = TER_GROUND_COL[g];
-  const alt = (x * 7 + y * 11) % 5;
+  const hsh = hash2(x, y);
+  const alt = hash2(x + 8191, y + 4093) % 5;
   c.fillStyle = alt === 0 ? shade(col, 1.05) : (alt === 3 ? shade(col, 0.95) : col);
   c.fill();
 
   // بلاطة حقيقية من الأصول (CC0) لو محمّلة — بتغطي اللون الإجرائي
+  // الاختيار بالـ hash (مش صيغة خطية كانت بتطلع شرائط قطرية منتظمة)
+  // + عائلة متنوّعة: عشب عادي/متوسط، رمل/تربة لكسر التكرار (B2)
   let tiled = false;
   if (g === TER.SAND || g === TER.GRASS) {
-    const tkey = (g === TER.SAND ? 't_sand' : 't_grass') + ((x * 7 + y * 11) & 3);
+    const fam = g === TER.SAND
+      ? ((hsh % 10 < 8) ? 't_sand' : 't_dirt')
+      : ((hsh % 10 < 7) ? 't_grass' : 't_gmed');
+    let tkey = fam + ((hsh >>> 8) & 3);
+    if (!artReady(tkey)) tkey = (g === TER.SAND ? 't_sand' : 't_grass') + ((hsh >>> 8) & 3);
     if (artReady(tkey)) {
       c.drawImage(artImg(tkey), nx - HW, ny, CFG.TW, CFG.TH);
       tiled = true;
     }
   }
 
-  c.strokeStyle = 'rgba(0,0,0,0.07)';
-  c.lineWidth = 1;
-  c.stroke();
+  // بلاطة المية من غير إطار (كان بيطلع شبكة خطوط فوق البركة)
+  if (g !== TER.WATER) {
+    c.strokeStyle = 'rgba(0,0,0,0.07)';
+    c.lineWidth = 1;
+    c.stroke();
+  }
 
   if (g === TER.WATER) {
     c.strokeStyle = 'rgba(255,255,255,0.16)';
@@ -131,19 +143,52 @@ function bakeTile(c, x, y, OX) {
       c.fillRect(cx - 5, cy + 2, 4, 2);
     }
   } else if (g === TER.MOUNTAIN) {
-    const apex = { x: cx, y: cy - 30 };
+    // ارتفاع ودرجة لون متغيّرين لكل بلاطة (كسر تكرار المثلثات المتطابقة)
+    const mh = hash2(x + 31, y + 77);
+    const apex = { x: cx, y: cy - (20 + (mh % 5) * 5) };
+    const tint = 0.92 + ((mh >>> 8) % 5) * 0.04;
     const Wp = { x: cx - HW, y: cy }, Sp = { x: cx, y: cy + HH }, Ep = { x: cx + HW, y: cy };
-    c.fillStyle = '#7a7264';
+    c.fillStyle = shade('#7a7264', tint);
     c.beginPath(); c.moveTo(Wp.x, Wp.y); c.lineTo(Sp.x, Sp.y); c.lineTo(apex.x, apex.y); c.closePath(); c.fill();
-    c.fillStyle = '#968d7d';
+    c.fillStyle = shade('#968d7d', tint);
     c.beginPath(); c.moveTo(Sp.x, Sp.y); c.lineTo(Ep.x, Ep.y); c.lineTo(apex.x, apex.y); c.closePath(); c.fill();
-    c.fillStyle = '#c9c2b4';
+    c.fillStyle = shade('#c9c2b4', tint);
     c.beginPath();
     c.moveTo(apex.x, apex.y);
     c.lineTo(apex.x - 6, apex.y + 11);
     c.lineTo(apex.x + 5, apex.y + 9);
     c.closePath(); c.fill();
   }
+
+  // مزج حواف البلاطة مع الجار من نوع مختلف (B2): رسمة رقيقة مقصوصة داخل البلاطة
+  if (g === TER.SAND || g === TER.GRASS || g === TER.WATER) blendTileEdges(c, x, y, g, nx, ny);
+}
+
+/* ألوان المزج: متوسط البلاطة الحقيقية (لو محمّلة) وإلا لون الإجرائي */
+const BLEND_COL = { 0: 'rgb(142,139,101)', 1: 'rgb(71,100,39)' };
+function blendColOf(g) {
+  if (g === TER.WATER) return TER_WATER_COL;
+  if (artReady((g === TER.SAND ? 't_sand' : 't_grass') + '0')) return BLEND_COL[g];
+  return TER_GROUND_COL[g];
+}
+function blendTileEdges(c, x, y, g, nx, ny) {
+  const HW = CFG.HW, HH = CFG.HH;
+  const N = [nx, ny], E = [nx + HW, ny + HH], S = [nx, ny + HH * 2], W = [nx - HW, ny + HH];
+  // الحواف المشتركة مع الجيران الأربعة: [dx, dy, من, إلى]
+  const edges = [[1, 0, E, S], [-1, 0, W, N], [0, 1, W, S], [0, -1, N, E]];
+  c.save();
+  c.beginPath();
+  c.moveTo(N[0], N[1]); c.lineTo(E[0], E[1]); c.lineTo(S[0], S[1]); c.lineTo(W[0], W[1]);
+  c.closePath(); c.clip();
+  c.lineWidth = 9; c.lineCap = 'round'; c.globalAlpha = 0.5;
+  for (const e of edges) {
+    const ng = inBounds(x + e[0], y + e[1]) ? G.ground[idx(x + e[0], y + e[1])] : TER.MOUNTAIN;
+    if (ng === g || ng === TER.MOUNTAIN) continue;
+    if (ng !== TER.SAND && ng !== TER.GRASS && ng !== TER.WATER) continue;
+    c.strokeStyle = blendColOf(ng);
+    c.beginPath(); c.moveTo(e[2][0], e[2][1]); c.lineTo(e[3][0], e[3][1]); c.stroke();
+  }
+  c.restore();
 }
 
 function buildMinimapBase() {
@@ -284,9 +329,10 @@ function tileCenter(x, y) {
   return { x: isoX(x + 0.5, y + 0.5), y: isoY(x + 0.5, y + 0.5) };
 }
 function shadow(ctx, x, y, rx, ry) {
+  // ظل باتجاه ثابت: الشمس من الشمال-غرب → الظل يميل للجنوب-شرق (B7)
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + rx * 0.42, y + ry * 0.5, rx * 0.96, ry * 0.92, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -295,11 +341,14 @@ function shadow(ctx, x, y, rx, ry) {
    ------------------------------------------------------------ */
 function drawTree(ctx, x, y) {
   const p = tileCenter(x, y);
-  // صورة حقيقية من الأصول (CC0) لو محمّلة
-  const im = artImg('r_tree');
+  // نوع الشجرة: رمل → نخل، عشب → تنويع hash بين كستن/بتول/صنوبر (B3)
+  const sand = G.ground[idx(x, y)] === TER.SAND;
+  const key = sand ? 'r_palm' : ['r_tree', 'r_tree2', 'r_tree3'][hash2(x, y) % 3];
+  const dw = { r_tree: 80, r_tree2: 72, r_tree3: 58, r_palm: 56 }[key] || 80;
+  const im = artImg(key);
   if (im && im.complete && im.naturalWidth > 0) {
     shadow(ctx, p.x, p.y + 4, 13, 6);
-    const dw = 80, dh = dw * im.naturalHeight / im.naturalWidth;
+    const dh = dw * im.naturalHeight / im.naturalWidth;
     ctx.drawImage(im, p.x - dw / 2, p.y + 6 - dh, dw, dh);
     return;
   }
@@ -380,6 +429,71 @@ const BUILD_ART_FIT = {
   farm: 0.8, quarry: 0.95
 };
 
+/* سور متصل (B5): كشف الجيران ±1، merlons على الحواف المكشوفة، بلا أيقونة */
+function drawWall(ctx, b, cols, h, nx, ny, ex, ey, sx, sy, wx, wy, cx, cy) {
+  const has = (x, y) => G.buildings.some(o => !o.dead && o.key === 'wall' && o.x === x && o.y === y);
+  const nE = has(b.x + 1, b.y), nS = has(b.x, b.y + 1), nW = has(b.x - 1, b.y), nN = has(b.x, b.y - 1);
+
+  // ظل مائل للجنوب-شرق (B7)
+  const shx = 4 + h * 0.5, shy = 4 + h * 0.18;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.moveTo(nx + shx, ny + shy); ctx.lineTo(ex + shx, ey + shy);
+  ctx.lineTo(sx + shx, sy + 6 + shy); ctx.lineTo(wx + shx, wy + shy);
+  ctx.closePath(); ctx.fill();
+
+  ctx.globalAlpha = b.built < 1 ? 0.72 : 1;
+
+  // الوجهان (يستمران عبر الجيران → شكل سور واحد)
+  ctx.fillStyle = cols[2];
+  ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(sx, sy); ctx.lineTo(sx, sy - h); ctx.lineTo(wx, wy - h); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = cols[1];
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.lineTo(ex, ey - h); ctx.lineTo(sx, sy - h); ctx.closePath(); ctx.fill();
+
+  // مداميك (خطوط مортار على الوجهين)
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
+  for (const f of [0.33, 0.66]) {
+    ctx.beginPath(); ctx.moveTo(wx, wy - f * h); ctx.lineTo(sx, sy - f * h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx, sy - f * h); ctx.lineTo(ex, ey - f * h); ctx.stroke();
+  }
+
+  // السطح العلوي (خطوة السور wall-walk)
+  ctx.fillStyle = cols[0];
+  ctx.beginPath();
+  ctx.moveTo(nx, ny - h); ctx.lineTo(ex, ey - h); ctx.lineTo(sx, sy - h); ctx.lineTo(wx, wy - h);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // merlons: حافة علوية مكشوفة = بلا جار متجاور
+  // خريطة: الجار (x,y-1)↔حافة N-E، (x-1,y)↔N-W، (x+1,y)↔E-S، (x,y+1)↔W-S
+  const Nt = [nx, ny - h], Et = [ex, ey - h], St = [sx, sy - h], Wt = [wx, wy - h];
+  const edges = [[nN, Nt, Et], [nW, Nt, Wt], [nE, Et, St], [nS, Wt, St]];
+  for (const e of edges) {
+    if (e[0]) continue;
+    const A = e[1], B = e[2];
+    for (const t of [0.25, 0.75]) {
+      const px = A[0] + (B[0] - A[0]) * t, py = A[1] + (B[1] - A[1]) * t;
+      const mw = 4, mh = 7;
+      ctx.fillStyle = cols[1];
+      ctx.beginPath();
+      ctx.moveTo(px - mw, py); ctx.lineTo(px + mw, py);
+      ctx.lineTo(px + mw, py - mh); ctx.lineTo(px - mw, py - mh);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = cols[0];
+      ctx.fillRect(px - mw, py - mh, mw * 2, 2.5);
+      ctx.strokeStyle = 'rgba(0,0,0,0.32)'; ctx.lineWidth = 1;
+      ctx.strokeRect(px - mw + 0.5, py - mh + 0.5, mw * 2 - 1, mh - 1);
+    }
+  }
+
+  // حدود المقدّمة (الفرونت)
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(nx, ny); ctx.lineTo(ex, ey); ctx.stroke();
+
+  ctx.globalAlpha = 1;
+  return cy - h - 12;
+}
+
 function drawBuilding(ctx, b) {
   const def = b.def;
   const cols = BUILD_COL[b.key] || ['#aaa', '#888', '#666'];
@@ -401,6 +515,8 @@ function drawBuilding(ctx, b) {
     const dw = (b.w + b.h) * HW * (BUILD_ART_FIT[b.key] || 1);
     const dh = Math.round(dw * art.naturalHeight / art.naturalWidth);
     const dx = cx - dw / 2, dy = sy + 6 - dh;
+    // ظل مبنى حقيقي: بيضاوي متجه للجنوب-شرق تحت القاعدة (B7)
+    shadow(ctx, cx, sy + 4, (b.w + b.h) * HW * 0.42, (b.w + b.h) * HH * 0.55);
     if (b.flash > 0) ctx.filter = 'brightness(1.6) saturate(2.4) sepia(0.5) hue-rotate(-20deg)';
     ctx.drawImage(art, dx, dy, dw, dh);
     ctx.filter = 'none';
@@ -414,12 +530,15 @@ function drawBuilding(ctx, b) {
       ctx.lineTo(cx, dy - 10); ctx.closePath(); ctx.fill();
       topY = dy - 26;
     }
+  } else if (b.key === 'wall') {
+    topY = drawWall(ctx, b, cols, h, nx, ny, ex, ey, sx, sy, wx, wy, cx, cy);
   } else {
 
-  // ظل
+  // ظل متجه للجنوب-شرق حسب الارتفاع (B7)
+  const shx = 4 + h * 0.5, shy = 4 + h * 0.16;
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
-  ctx.moveTo(nx, ny + 4); ctx.lineTo(ex, ey + 4); ctx.lineTo(sx, sy + 6); ctx.lineTo(wx, wy + 4);
+  ctx.moveTo(nx + shx, ny + shy); ctx.lineTo(ex + shx, ey + shy); ctx.lineTo(sx + shx, sy + 6 + shy); ctx.lineTo(wx + shx, wy + shy);
   ctx.closePath(); ctx.fill();
 
   ctx.globalAlpha = b.built < 1 ? 0.72 : 1;

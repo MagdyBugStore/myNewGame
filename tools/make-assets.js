@@ -54,7 +54,9 @@ const SH_DIR = path.join(ROOT, 'ref', 'extracted');     // Stronghold مستخر
 const SHEET_COLS = 8;                    // الورقة 512×224 = 8 أعمدة × 7 صفوف
 const GROUND = {
   sand: { file: 'sand_64x32.png', cells: [0, 1, 2, 3] },
-  grass: { file: 'grass_green_64x32.png', cells: [0, 1, 2, 3] }
+  grass: { file: 'grass_green_64x32.png', cells: [0, 1, 2, 3] },
+  gmed: { file: 'grass_medium_64x32.png', cells: [0, 1, 2, 3] },   // تنويع عشب
+  dirt: { file: 'dirt_64x32.png', cells: [0, 1, 2, 3] }            // تربة بين الرمال
 };
 
 /* مباني العالم — قص الحواف الشفافة ثم تصغير. w=0 يعني من غير تصغير */
@@ -72,9 +74,12 @@ const BUILD_ART = [
 
 /* موارد الخريطة: الشجرة من Stronghold المستخرج، الصخور/الخام من Kenney (CC0) */
 const RES_ART = [
-  { key: 'r_tree', src: 'sh:gm/Tree_Chestnut/0040.png', w: 110 },
-  { key: 'r_rock', src: 'kenney/PNG/Retina/Environment/medievalEnvironment_09.png', w: 96 },
-  { key: 'r_iron', src: 'kenney/PNG/Retina/Environment/medievalEnvironment_11.png', w: 96 }
+  { key: 'r_tree',  src: 'sh:gm/Tree_Chestnut/0040.png', w: 110 },   // كستن عريض
+  { key: 'r_tree2', src: 'sh:gm/tree_birch/0040.png', w: 96 },        // بتول أخضر
+  { key: 'r_tree3', src: 'sh:gm/tree_pine/0040.png', w: 96 },         // صنوبر طويل
+  { key: 'r_palm',  src: 'sh:gm/tree_oak/0040.png', w: 80 },          // نخل (للرمل)
+  { key: 'r_rock',  src: 'kenney/PNG/Retina/Environment/medievalEnvironment_09.png', w: 96 },
+  { key: 'r_iron',  src: 'kenney/PNG/Retina/Environment/medievalEnvironment_11.png', w: 96 }
 ];
 
 /* حل مصدر الملف: sh: = ref/extracted، غير كده = tools/assets_raw */

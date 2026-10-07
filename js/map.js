@@ -45,7 +45,9 @@ function generateMap() {
         if (!inBounds(x, y)) continue;
         const dx = x - cx, dy = y - cy;
         const d = Math.sqrt(dx * dx + dy * dy);
-        const wob = r * (0.7 + 0.55 * ((Math.sin(x * 1.7 + y * 2.3) + 1) * 0.5));
+        // تذبذب عشوائي منخفض التردد: سينوس ناعم + jitter من hash (بدل sine عالي التردد كان بيطلع حواف زوايا منتظمة)
+        const wob = r * (0.78 + 0.34 * ((Math.sin(x * 0.32 + y * 0.47) + 1) * 0.5)
+          + 0.13 * (hash2(x, y) / 4294967296 - 0.5));
         if (d <= wob) fn(x, y);
       }
     }

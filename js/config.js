@@ -20,6 +20,13 @@ const TER = { SAND: 0, GRASS: 1, WATER: 2, MOUNTAIN: 3, TREE: 4, ROCK: 5, IRON: 
 const TER_GROUND_COL = ['#d8c48d', '#79a952', '#3b7cbe', '#7d7466'];
 const TER_WATER_COL = '#3b7cbe';
 
+/* hash منتشر لتنويع بلاطات/حدود بلا قرارات متسلسلة (يشبه التوزيع العشوائي) */
+function hash2(x, y) {
+  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 const RES_KEYS = ['food', 'wood', 'stone', 'iron', 'gold'];
 const RES_NAME = { food: 'طعام', wood: 'خشب', stone: 'حجر', iron: 'حديد', gold: 'ذهب' };
 const RES_ICON = { food: '🌾', wood: '🪵', stone: '🪨', iron: '⛏️', gold: '🪙' };
