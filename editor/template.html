@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>محرّر الخرائط — حروب الصليبيين</title>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>🗺️ إنشاء خريطة</h1>
+
+    <div class="sec">
+      <h2>الخريطة</h2>
+      <div class="row"><label>الاسم</label><input type="text" id="mapName" value="خريطتي"></div>
+      <div class="row">
+        <label>الحجم</label>
+        <select id="mapSize">
+          <option value="32">32 × 32</option>
+          <option value="48">48 × 48</option>
+          <option value="64" selected>64 × 64</option>
+          <option value="96">96 × 96</option>
+          <option value="128">128 × 128</option>
+        </select>
+        <button id="btnNew" class="danger">خريطة جديدة</button>
+      </div>
+      <div class="row"><label>الأرض الافتراضية</label>
+        <select id="baseGround"><option value="0" selected>رمل</option><option value="1">عشب</option></select>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>الأرض</h2>
+      <div class="tools ground" id="groundTools"></div>
+    </div>
+
+    <div class="sec">
+      <h2>الموارد</h2>
+      <div class="tools" id="resTools">
+        <button data-r="4"><i>🌴</i>شجر</button>
+        <button data-r="5"><i>🪨</i>حجر</button>
+        <button data-r="6"><i>⛏️</i>حديد</button>
+        <button data-r="0"><i>🧹</i>مسح مورد</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>النباتات (شجر • شجيرات • أعشاب)</h2>
+      <div class="tools ground" id="vegTools"></div>
+    </div>
+
+    <div class="sec">
+      <h2>أدوات</h2>
+      <div class="tools" id="toolBtns">
+        <button data-t="paint" class="on"><i>🖌️</i>فرشاة</button>
+        <button data-t="fill"><i>🪣</i>تعبئة</button>
+        <button data-t="start"><i>🚩</i>بداية لاعب</button>
+        <button data-t="pan"><i>✋</i>تحريك</button>
+      </div>
+      <div class="row" style="margin-top:8px"><label>حجم الفرشاة</label><input type="range" id="brush" min="1" max="12" value="3"><b id="brushV">3</b></div>
+      <div class="row">
+        <label>الشكل</label>
+        <button id="shapeCircle" class="on">دائرة</button>
+        <button id="shapeSquare">مربع</button>
+      </div>
+      <div class="row">
+        <label>اللاعب</label>
+        <select id="playerSel"></select>
+        <button id="btnAddStart">+ لاعب</button>
+        <button id="btnDelStart" class="danger">حذف</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>العرض</h2>
+      <div class="row">
+        <button id="btnGrid" class="on">شبكة</button>
+        <button id="btnObjs" class="on">الموارد</button>
+        <button id="btnFit">ملاءمة</button>
+        <button id="btnUndo">↶ تراجع</button>
+        <button id="btnRedo">↷ إعادة</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>حفظ وتحميل</h2>
+      <div class="row">
+        <button id="btnSave" class="primary">حفظ في المتصفح</button>
+        <select id="savedList"></select>
+        <button id="btnLoad">فتح</button>
+      </div>
+      <div class="row">
+        <button id="btnExport">تصدير JSON</button>
+        <button id="btnImport">استيراد</button>
+        <input type="file" id="fileIn" accept=".json,application/json" hidden>
+      </div>
+      <div class="row"><button id="btnPlay" class="primary" style="flex:1">▶ جرّب الخريطة في اللعبة</button></div>
+    </div>
+
+    <div class="sec">
+      <h2>فحص الخريطة</h2>
+      <div id="warn"></div>
+    </div>
+
+    <div class="sec">
+      <h2>إحصائيات</h2>
+      <div id="stats"></div>
+    </div>
+
+    <div class="sec">
+      <h2>اختصارات</h2>
+      <div class="help">
+        <kbd>عجلة الفأرة</kbd> تكبير/تصغير • <kbd>زر أيمن</kbd> أو <kbd>مسافة</kbd>+سحب لتحريك الخريطة<br>
+        <kbd>WASD</kbd> / الأسهم حركة • <kbd>[</kbd> <kbd>]</kbd> حجم الفرشاة<br>
+        <kbd>Ctrl+Z</kbd> تراجع • <kbd>Ctrl+Y</kbd> إعادة • <kbd>G</kbd> الشبكة
+      </div>
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud">—</div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+{{JS}}
+</script>
+</body>
+</html>

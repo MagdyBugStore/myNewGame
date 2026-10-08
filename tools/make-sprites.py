@@ -182,6 +182,7 @@ def static_img(body, frame, scale, pal=None, anchor_bottom=True):
     cx = sum(xs) / len(xs)
     half = max(cx - bb[0], bb[2] - cx)
     img = img.crop((int(cx - half), bb[1], int(cx + half) + 1, bb[3]))
+    soften_shadow(img)
     return scale_img(img, scale)
 
 
@@ -353,6 +354,118 @@ def goods_art():
     return art, meta
 
 
+# ---------- أنواع أرض إضافية (عائلات بلاطات من tools/terrain_families.json) ----------
+# id ثابت لكل نوع (بيتخزّن في الخريطة)، build = يتبني عليه ويتحط عليه موارد، solid = ممنوع المشي
+GROUND_EXT = [
+    # id, key (عائلة البلاطات), الاسم, build, solid, عدد الأشكال
+    (8,  'sand_smooth',  'رمل ناعم',     1, 0, 12),
+    (9,  'sand_cracked', 'رمل متشقق',    1, 0, 12),
+    (10, 'sand_coarse',  'رمل خشن',      1, 0, 12),
+    (11, 'sand_pebbles', 'رمل بحصى',     1, 0, 12),
+    (12, 'dirt_brown',   'تربة بنية',    1, 0, 12),
+    (13, 'gravel',       'حصى ذهبي',     1, 0, 12),
+    (14, 'sand_sprouts', 'رمل بنبت',     1, 0, 12),
+    (15, 'grass_lush',   'عشب كثيف',     1, 0, 14),
+    (16, 'grass_tufts',  'عشب متفرّق',   1, 0, 10),
+    (17, 'stones_light', 'حجارة فاتحة',  0, 0, 14),
+    (18, 'stones_dark',  'حجارة داكنة',  0, 0, 14),
+    (19, 'rock_orange',  'صخر برتقالي',  0, 0, 12),
+    (20, 'rock_red',     'صخر محمر',     0, 0, 9),
+    (21, 'mtn_dark',     'جبل داكن',     0, 1, 12),
+    (22, 'mtn_rubble',   'جبل ركام',     0, 1, 12),
+    (23, 'mtn_boulder',  'جبل صخور',     0, 1, 12),
+]
+MTN_FAMS = {'mtn_dark': ('tile_land3', list(range(0, 30))),
+            'mtn_rubble': ('tile_land3', list(range(30, 63))),
+            'mtn_boulder': ('tile_land3', list(range(63, 104)))}
+
+
+def ground_ext_art():
+    fams = json.load(open(os.path.join(HERE, 'terrain_families.json'), encoding='utf-8'))
+    for k, (body, fr) in MTN_FAMS.items(): fams[k] = [[body, f] for f in fr]
+    art, ext, gfam = {}, {}, {}
+    for gid, key, name, build, solid, nvar in GROUND_EXT:
+        frames = fams[key]
+        if build:
+            flat = [f for f in frames if Image.open(os.path.join(GM, f[0], '%04d.png' % f[1])).size[1] <= 18]
+            if len(flat) >= 6: frames = flat
+        frames = evenly(frames, nvar)
+        tot = [0, 0, 0, 0]
+        for i, (body, f) in enumerate(frames):
+            im = tile_native(body, f)
+            art['g_%s%d' % (key, i)] = png_uri(im)
+            px = im.load()
+            for y in range(im.size[1] - 16, im.size[1]):
+                for x in range(im.size[0]):
+                    c = px[x, y]
+                    if c[3] > 200: tot[0] += c[0]; tot[1] += c[1]; tot[2] += c[2]; tot[3] += 1
+        gfam[key] = dict(n=len(frames), avg=[round(tot[j] / max(1, tot[3])) for j in range(3)])
+        ext[gid] = dict(name=name, fam=key, build=build, solid=solid)
+        print('  ground %-3d %-14s %d variants' % (gid, key, len(frames)))
+    return art, ext, gfam
+
+
+# ---------- نباتات (شجر / شجيرات / صبار / أعشاب): id ثابت بيتخزّن في الخريطة ----------
+# tree=1 → مورد خشب (يتقطع) ، tree=0 → ديكور بس (مش بيمنع مشي ولا بناء)
+VEG = [
+    (30, 'palm_dark',   'نخل غامق',      'tree_oak',      0, 1),
+    (31, 'palm_light',  'نخل فاتح',      'tree_pine',     0, 1),
+    (32, 'chestnut',    'شجر كستناء',    'Tree_Chestnut', 0, 1),
+    (33, 'palm_orange', 'نخل برتقالي',   'tree_birch',    0, 1),
+    (34, 'apple',       'شجر تفاح',      'tree_apple',   12, 1),
+    (40, 'cactus_pear', 'صبار شوكي',     'tree_cactii',   7, 0),
+    (41, 'cactus_bush', 'شجيرة شوكية',   'tree_cactii',   1, 0),
+    (42, 'cactus_col',  'صبار أعمدة',    'tree_cactii',  11, 0),
+    (43, 'cactus_tall', 'صبار طويل',     'tree_cactii',  13, 0),
+    (44, 'cactus_giant','صبار عملاق',    'tree_cactii',  14, 0),
+    (45, 'cactus_thin', 'صبار رفيع',     'tree_cactii',  15, 0),
+    (46, 'agave',       'ألوة كبيرة',    'tree_cactii',   3, 0),
+    (47, 'agave_small', 'ألوة صغيرة',    'tree_cactii',   4, 0),
+    (48, 'shrub_dry',   'شجيرة جافة',    'tree_shrub1',   0, 0),
+    (49, 'fern_palm',   'سرخس نخلي',     'tree_shrub2',   0, 0),
+]
+
+
+def veg_art():
+    art, meta = {}, {}
+    for vid, key, name, body, fr, tree in VEG:
+        im = static_img(body, fr, 1.0)
+        art['v_' + key] = png_uri(im)
+        meta[vid] = dict(key=key, name=name, tree=tree)
+    return art, meta
+
+
+# ---------- أنيميشن شغل العامل جوه المبنى (anim_*): بيتحط فوق sprite المبنى لما العامل يشتغل ----------
+# المرساة (50,72) في الفريم الأصلي = مركز مساحة المبنى على الأرض
+ANIM_B = {
+    'bakery':     ('anim_baker',      list(range(0, 64)),   24),
+    'blacksmith': ('anim_blacksmith', list(range(24, 110)), 26),
+    'fletcher':   ('anim_fletcher',   list(range(0, 72)),   24),
+    'poleturner': ('anim_poleturner', list(range(0, 61)),   20),
+}
+
+
+def building_anims():
+    art, meta = {}, {}
+    for key, (body, frames, nmax) in ANIM_B.items():
+        gm = GM1(body)
+        frames = evenly(frames, nmax)
+        ims = [gm.frame(f, 0) for f in frames]
+        for im in ims: soften_shadow(im)
+        l = t = 10 ** 9; r = b = -10 ** 9
+        for im in ims:
+            bb = im.getchannel('A').point(lambda v: 255 if v > 8 else 0).getbbox()
+            if bb: l = min(l, bb[0]); t = min(t, bb[1]); r = max(r, bb[2]); b = max(b, bb[3])
+        cw, ch = r - l, b - t
+        atlas = Image.new('RGBA', (cw * len(ims), ch), (0, 0, 0, 0))
+        for i, im in enumerate(ims): atlas.alpha_composite(im.crop((l, t, r, b)), (i * cw, 0))
+        q = atlas.quantize(colors=256, method=Image.FASTOCTREE, dither=Image.NONE)
+        art['an_' + key] = png_uri(q.convert('RGBA'))
+        meta[key] = dict(k='an_' + key, n=len(ims), cw=cw, ch=ch, ax=50 - l, ay=72 - t)
+        print('  anim %-10s %d frames  cell %dx%d' % (key, len(ims), cw, ch))
+    return art, meta
+
+
 def main():
     out = {}
     for kind, spec in UNITS.items():
@@ -368,11 +481,20 @@ def main():
     art.update(rart)
     gart, gmeta = goods_art()
     art.update(gart)
+    aart, ameta = building_anims()
+    art.update(aart)
+    eart, gext, gfam = ground_ext_art()
+    art.update(eart)
+    vart, vmeta = veg_art()
+    art.update(vart)
     js = "'use strict';\n/* ملف مولَّد تلقائي — python tools/make-sprites.py (المصدر: ref/gm) */\n"
     js += 'const SPR_U = ' + json.dumps(out, separators=(',', ':')) + ';\n'
     js += 'Object.assign(ART, ' + json.dumps(art, separators=(',', ':')) + ');\n'
     js += 'const SPR_B = ' + json.dumps(bmeta, separators=(',', ':')) + ';\n'
     js += 'const SPR_G = ' + json.dumps(gmeta, separators=(',', ':')) + ';\n'
+    js += 'const GEXT = ' + json.dumps(gext, ensure_ascii=False, separators=(',', ':')) + ';\nconst GFAM = ' + json.dumps(gfam, separators=(',', ':')) + ';\n'
+    js += 'const VEG = ' + json.dumps(vmeta, ensure_ascii=False, separators=(',', ':')) + ';\n'
+    js += 'const SPR_A = ' + json.dumps(ameta, separators=(',', ':')) + ';\n'
     js += 'const RES_N = ' + json.dumps(rn) + ';\n'
     js += 'const TILE_N = ' + json.dumps(tcounts) + ';\nconst TILE_AVG = ' + json.dumps(tavg) + ';\n'
     with open(OUT, 'w', encoding='utf-8') as f:

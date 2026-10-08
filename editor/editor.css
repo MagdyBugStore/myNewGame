@@ -1,0 +1,53 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#0b0d12; color:#f2e9d8;
+  font-family:"Segoe UI", Tahoma, "Noto Naskh Arabic", Arial, sans-serif; font-size:13px;
+  user-select:none; -webkit-user-select:none; }
+
+#app { position:fixed; inset:0; display:flex; flex-direction:row; direction:rtl; }
+
+/* ---------- اللوحة الجانبية ---------- */
+#panel { width:300px; flex:0 0 300px; overflow-y:auto; padding:10px;
+  background:linear-gradient(180deg,#14171f,#0f1218); border-inline-end:1px solid #5a4a2f; }
+#panel h1 { font-size:17px; color:#ffe9a8; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.sec { border:1px solid rgba(180,150,90,.28); border-radius:8px; padding:8px; margin-bottom:9px; background:rgba(255,255,255,.025); }
+.sec > h2 { font-size:12px; font-weight:600; color:#d9c9a3; margin-bottom:7px; letter-spacing:.3px; }
+.row { display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+.row:last-child { margin-bottom:0; }
+label { color:#bfb396; font-size:12px; }
+
+button, select, input[type=text], input[type=number] {
+  font:inherit; color:#f2e9d8; background:#1d212b; border:1px solid #4a3f2a; border-radius:6px; padding:5px 9px; }
+button { cursor:pointer; transition:background .12s, border-color .12s; }
+button:hover { background:#2a2f3c; border-color:#8d7640; }
+button.on { background:#4a3a14; border-color:#e0b759; color:#fff2c4; }
+button.primary { background:#5d4a12; border-color:#e0b759; font-weight:700; }
+button.primary:hover { background:#7a6118; }
+button.danger:hover { background:#5a1f1a; border-color:#d9574a; }
+input[type=range] { flex:1; accent-color:#e0b759; }
+input[type=text] { flex:1; min-width:0; }
+
+.tools { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; }
+.tools button { display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 2px; font-size:11px; }
+.tools button i { font-style:normal; font-size:18px; line-height:1; }
+.sw { width:22px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.6); display:inline-block; }
+
+#warn { color:#ffb08a; font-size:12px; line-height:1.6; }
+#warn.ok { color:#9be08a; }
+#stats { color:#bfb396; font-size:12px; line-height:1.7; }
+#stats b { color:#ffe9a8; font-weight:600; }
+.help { color:#8d856f; font-size:11px; line-height:1.7; }
+kbd { background:#262b37; border:1px solid #4a3f2a; border-radius:4px; padding:0 4px; font-size:10px; }
+
+/* ---------- لوحة الرسم ---------- */
+#stage { position:relative; flex:1; min-width:0; }
+#cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; background:#07080c; }
+#hud { position:absolute; left:10px; bottom:10px; background:rgba(12,14,20,.82); border:1px solid #5a4a2f;
+  border-radius:6px; padding:4px 10px; font-size:12px; direction:ltr; pointer-events:none; }
+#toast { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:rgba(40,32,12,.95);
+  border:1px solid #e0b759; border-radius:8px; padding:7px 16px; opacity:0; transition:opacity .25s; pointer-events:none; }
+#toast.show { opacity:1; }
+
+.tools.ground { grid-template-columns:repeat(4,1fr); max-height:320px; overflow-y:auto; padding-inline-end:2px; }
+.tools.ground button { padding:4px 2px; gap:2px; }
+.tools.ground img.pv { width:48px; height:28px; object-fit:contain; object-position:bottom; image-rendering:pixelated; }
+.tools.ground span { font-size:10px; line-height:1.15; text-align:center; }

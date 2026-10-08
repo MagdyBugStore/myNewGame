@@ -19,6 +19,17 @@ const CFG = {
 // أنواع التضاريس: 0..3 أرض ، 4..6 موارد
 const TER = { SAND: 0, GRASS: 1, WATER: 2, MOUNTAIN: 3, TREE: 4, ROCK: 5, IRON: 6 };
 const TER_GROUND_COL = ['#d8c48d', '#79a952', '#3b7cbe', '#7d7466'];
+
+/* أنواع أرض إضافية (id >= 8) من js/spr.js: GEXT[id] = {name, fam, build, solid} ، GFAM[fam] = {n, avg} */
+function gExt(g) { return (typeof GEXT !== 'undefined') ? GEXT[g] : undefined; }
+function gBuild(g) { if (g === TER.SAND || g === TER.GRASS) return true; const e = gExt(g); return !!(e && e.build); }
+function gSolid(g) { if (g === TER.WATER || g === TER.MOUNTAIN) return true; const e = gExt(g); return !!(e && e.solid); }
+function gSandy(g) { if (g === TER.SAND) return true; const e = gExt(g); return !!(e && /^(sand|gravel|dirt)/.test(e.fam)); }
+function groundHex(g) {
+  if (TER_GROUND_COL[g]) return TER_GROUND_COL[g];
+  const e = gExt(g), f = e && typeof GFAM !== 'undefined' && GFAM[e.fam];
+  return f ? '#' + f.avg.map(v => ('0' + v.toString(16)).slice(-2)).join('') : '#a08c60';
+}
 const TER_WATER_COL = '#3b7cbe';
 
 /* hash منتشر لتنويع بلاطات/حدود بلا قرارات متسلسلة (يشبه التوزيع العشوائي) */

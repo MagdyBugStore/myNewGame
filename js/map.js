@@ -21,7 +21,64 @@ const rnd = (a, b) => a + RND() * (b - a);
 /* ------------------------------------------------------------
    توليد الخريطة
    ------------------------------------------------------------ */
+/* خريطة من المحرّر (editor.html): localStorage 'rts_custom_map' لما الرابط فيه ?map=custom */
+function loadCustomMap() {
+  try {
+    if (!/[?&]map=custom/.test(location.search)) return null;
+    const d = JSON.parse(localStorage.getItem('rts_custom_map') || 'null');
+    if (!d || d.v !== 1 || !d.w || !d.h || d.ground.length !== d.w * d.h || !d.starts || !d.starts.length) return null;
+    return d;
+  } catch (e) { return null; }
+}
+
+function generateCustomMap(d) {
+  const W = d.w, H = d.h;
+  G.w = W; G.h = H;
+  G.ground = new Uint8Array(W * H);
+  G.res = new Uint8Array(W * H);
+  G.amount = new Uint16Array(W * H);
+  G.blocked = new Uint8Array(W * H);
+  G._mark = new Int32Array(W * H);
+  G._settled = new Int32Array(W * H);
+  G._gs = new Float32Array(W * H);
+  G.vkind = new Uint8Array(W * H);
+  G.deco = new Uint8Array(W * H);
+  const AMT = { 4: 70, 5: 90, 6: 70 };
+  for (let i = 0; i < W * H; i++) {
+    const gc = d.ground.charCodeAt(i) - 48;
+    G.ground[i] = (gc >= 0 && gc <= 3) || gExt(gc) ? gc : 0;
+    const rc = d.res.charCodeAt(i) - 48;
+    if (rc > 0 && gBuild(G.ground[i])) {
+      const v = typeof VEG !== 'undefined' && VEG[rc];
+      if (v && v.tree) { G.res[i] = TER.TREE; G.amount[i] = 70; G.vkind[i] = rc; }
+      else if (v) G.deco[i] = rc;                              // نبات ديكور: مش مورد ومش بيمنع حاجة
+      else if (rc === 4 || rc === 5 || rc === 6) { G.res[i] = rc; G.amount[i] = AMT[rc] || 70; }
+    }
+  }
+  const s0 = d.starts[0], s1 = d.starts[1] || { x: Math.max(0, W - 15), y: Math.max(0, H - 15) };
+  const BO = { p: { x: s0.x, y: s0.y }, e: { x: s1.x, y: s1.y } };
+  G.basePos = BO;
+  G.customMap = d.name || 'custom';
+  // منطقة القلعة 7×7 + حواف: أرض صالحة وبدون موارد
+  for (const b of [BO.p, BO.e]) {
+    for (let y = b.y - 1; y <= b.y + 8; y++) for (let x = b.x - 1; x <= b.x + 8; x++) {
+      if (!inBounds(x, y)) continue;
+      const k = idx(x, y);
+      G.res[k] = 0; G.amount[k] = 0;
+      if (x >= b.x && x < b.x + 7 && y >= b.y && y < b.y + 7 && !gBuild(G.ground[k])) G.ground[k] = TER.GRASS;
+    }
+  }
+  for (let i = 0; i < W * H; i++) {
+    const g = G.ground[i], r = G.res[i];
+    if (gSolid(g) || r === TER.ROCK || r === TER.IRON) G.blocked[i] = 1;
+  }
+  buildTerrainBake();
+  buildMinimapBase();
+}
+
 function generateMap() {
+  const cm = loadCustomMap();
+  if (cm) { generateCustomMap(cm); return; }
   const W = CFG.MAP_W, H = CFG.MAP_H;
   RND = mulberry32((Math.random() * 1e9) | 0);
 
@@ -33,6 +90,8 @@ function generateMap() {
   G._mark = new Int32Array(W * H);
   G._settled = new Int32Array(W * H);
   G._gs = new Float32Array(W * H);
+  G.vkind = new Uint8Array(W * H);
+  G.deco = new Uint8Array(W * H);
   G.ground.fill(TER.SAND);
 
   const gAt = (x, y) => (inBounds(x, y) ? G.ground[idx(x, y)] : TER.MOUNTAIN);
@@ -83,11 +142,17 @@ function generateMap() {
 
   // 4) غابات / صخور / حديد
   const canSpawn = (x, y) => { const g = gAt(x, y); return g === TER.SAND || g === TER.GRASS; };
-  const putRes = (x, y, t, amt) => { if (canSpawn(x, y)) { const k = idx(x, y); G.res[k] = t; G.amount[k] = amt; } };
+  // كثافة الغابات: شجرة كل بلاطتين (شبكة 2×2 بإزاحة عشوائية لكل مجموعة) والكمية x3 عشان إجمالي الخشب يفضل زي ما هو
+  const putRes = (x, y, t, amt) => {
+    if (t === TER.TREE) {
+      if ((x & 1) !== 0 || (y & 1) !== 0) return;
+      amt *= 3;
+    }
+    if (canSpawn(x, y)) { const k = idx(x, y); G.res[k] = t; G.amount[k] = amt; } };
 
   for (let i = 0; i < 55; i++) {
     const cx = rnd(3, W - 3), cy = rnd(3, H - 3), r = rnd(1.6, 3.6);
-    blob(cx, cy, r, (x, y) => { if (RND() < 0.85) putRes(x, y, TER.TREE, 70); });
+    blob(cx, cy, r * 1.35, (x, y) => { if (RND() < 0.9) putRes(x, y, TER.TREE, 70); });
   }
   for (let i = 0; i < 16; i++) {
     const cx = rnd(4, W - 4), cy = rnd(4, H - 4), r = rnd(1.4, 2.4);
@@ -100,7 +165,7 @@ function generateMap() {
 
   // 5) موارد مؤكدة بجانب كل قاعدة
   const seedRes = (bx, by) => {
-    blob(bx + 9, by + 3, 2.6, (x, y) => putRes(x, y, TER.TREE, 85));
+    blob(bx + 9, by + 3, 3.4, (x, y) => putRes(x, y, TER.TREE, 85));
     blob(bx + 3, by + 9, 2.2, (x, y) => putRes(x, y, TER.ROCK, 110));
     blob(bx + 10, by + 10, 1.7, (x, y) => putRes(x, y, TER.IRON, 85));
   };
@@ -125,7 +190,7 @@ function generateMap() {
   // 7) شبكة المنع
   for (let i = 0; i < W * H; i++) {
     const g = G.ground[i], r = G.res[i];
-    if (g === TER.WATER || g === TER.MOUNTAIN || r === TER.ROCK || r === TER.IRON) G.blocked[i] = 1;
+    if (gSolid(g) || r === TER.ROCK || r === TER.IRON) G.blocked[i] = 1;
   }
 
   buildTerrainBake();
@@ -143,7 +208,7 @@ function buildableAt(x, y) {
   if (G.blocked[k] === 1) return false;
   if (G.res[k] !== 0) return false;
   const g = G.ground[k];
-  return g === TER.SAND || g === TER.GRASS;
+  return gBuild(g);
 }
 
 function nearestFree(x, y, maxR) {

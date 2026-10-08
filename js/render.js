@@ -27,7 +27,7 @@ function artImg(key) {
   if (typeof ART === 'undefined' || !ART[key]) return null;
   const im = new Image();
   ART_IMG[key] = im;
-  im.onload = () => { if (key.indexOf('t_') === 0) G._tilesDirty = true; };
+  im.onload = () => { if (key.indexOf('t_') === 0 || key.indexOf('g_') === 0) G._tilesDirty = true; };
   im.src = ART[key];
   return im;
 }
@@ -38,13 +38,16 @@ function artReady(key) {
 function preloadArt() {
   if (typeof ART === 'undefined') return;
   for (const k of Object.keys(ART)) {
-    if (k.indexOf('t_') === 0 || k.indexOf('b_') === 0 || k.indexOf('r_') === 0) artImg(k);
+    if (/^(t_|b_|r_|g_)/.test(k)) artImg(k);
   }
   G._tilesDirty = true;   // نخبز الأرض تاني بعد ما البلاطات تجهز
 }
 /* لو البلاطات اتحمّلت (أو فشلت) → أعد خَبز الأرض مرة واحدة */
 function tilesDirtyCheck() {
   if (!G._tilesDirty) return;
+  if (typeof GFAM !== 'undefined') {
+    for (const fam in GFAM) for (let i = 0; i < GFAM[fam].n; i++) { const a = artImg('g_' + fam + i); if (a && !a.complete) return; }
+  }
   if (typeof TILE_N !== 'undefined') {
     for (const fam in TILE_N) {
       for (let i = 0; i < TILE_N[fam]; i++) {
@@ -55,6 +58,20 @@ function tilesDirtyCheck() {
   }
   buildTerrainBake();
   G._tilesDirty = false;
+}
+
+/* المبنى شغّال (العامل جواه بيصنّع)؟ بيتحدد من حالة العامل — الأنيميشن بيتحط فوق sprite المبنى */
+function buildingWorking(b) {
+  const w = b.worker;
+  return !!(b.built >= 1 && b.def.job && w && !w.dead && w.job === b && w.state === 'work' && typeof SPR_A !== 'undefined' && SPR_A[b.key]);
+}
+function drawBuildingAnim(ctx, b, sx, sy, working) {
+  const a = SPR_A[b.key], im = artImg(a.k);
+  if (!im || !im.complete || !im.naturalWidth) return;
+  const K2 = 2, cx = sx, cy = sy - b.w * CFG.HH;            // مركز مساحة المبنى (من الركن الجنوبي)
+  const f = working ? Math.floor(G.time * 12 + b.ph * 3) % a.n : 0;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(im, f * a.cw, 0, a.cw, a.ch, Math.round(cx - a.ax * K2), Math.round(cy - a.ay * K2), a.cw * K2, a.ch * K2);
 }
 
 /* sprite مبنى SHC (من js/spr.js): {im, v} أو null لو الصورة لسه بتتحمّل / مفيش sprite */
@@ -109,7 +126,7 @@ function bakeTile(c, x, y, OX) {
   c.lineTo(nx - HW, cy);
   c.closePath();
 
-  let col = TER_GROUND_COL[g];
+  let col = groundHex(g);
   const hsh = hash2(x, y);
   const alt = hash2(x + 8191, y + 4093) % 5;
   c.fillStyle = alt === 0 ? shade(col, 1.05) : (alt === 3 ? shade(col, 0.95) : col);
@@ -130,7 +147,11 @@ function bakeTile(c, x, y, OX) {
     c.drawImage(im, nx - HW, ny + CFG.TH - dh, im.naturalWidth * 2, dh);
     return true;
   };
-  if (g === TER.SAND) tiled = drawTileArt(tileKey((hsh % 10 < 8) ? 't_sand' : 't_dirt'));
+  const ext = gExt(g);
+  if (ext && typeof GFAM !== 'undefined' && GFAM[ext.fam]) {
+    if (ext.solid) drawTileArt(tileKey('t_sand'));          // أرضية تحت الجبل
+    tiled = drawTileArt('g_' + ext.fam + ((hsh >>> 8) % GFAM[ext.fam].n));
+  } else if (g === TER.SAND) tiled = drawTileArt(tileKey((hsh % 10 < 8) ? 't_sand' : 't_dirt'));
   else if (g === TER.GRASS) tiled = drawTileArt(tileKey((hsh % 10 < 8) ? 't_grass' : 't_gmed'));
   else if (g === TER.WATER) tiled = drawTileArt(tileKey('t_water'));
   else if (g === TER.MOUNTAIN) {
@@ -180,11 +201,13 @@ function bakeTile(c, x, y, OX) {
   }
 
   // مزج حواف البلاطة مع الجار من نوع مختلف (B2): رسمة رقيقة مقصوصة داخل البلاطة
-  if (g === TER.SAND || g === TER.GRASS || g === TER.WATER) blendTileEdges(c, x, y, g, nx, ny);
+  if (gBuild(g) || g === TER.WATER) blendTileEdges(c, x, y, g, nx, ny);
 }
 
 /* ألوان المزج: متوسط البلاطة الحقيقية (لو محمّلة) وإلا لون الإجرائي */
 function blendColOf(g) {
+  const ex = gExt(g);
+  if (ex && typeof GFAM !== 'undefined' && GFAM[ex.fam]) { const v = GFAM[ex.fam].avg; return 'rgb(' + v[0] + ',' + v[1] + ',' + v[2] + ')'; }
   if (typeof TILE_AVG !== 'undefined') {
     const k = g === TER.WATER ? 't_water' : (g === TER.SAND ? 't_sand' : 't_grass');
     const v = TILE_AVG[k];
@@ -205,8 +228,8 @@ function blendTileEdges(c, x, y, g, nx, ny) {
   c.lineWidth = 9; c.lineCap = 'round'; c.globalAlpha = 0.5;
   for (const e of edges) {
     const ng = inBounds(x + e[0], y + e[1]) ? G.ground[idx(x + e[0], y + e[1])] : TER.MOUNTAIN;
-    if (ng === g || ng === TER.MOUNTAIN) continue;
-    if (ng !== TER.SAND && ng !== TER.GRASS && ng !== TER.WATER) continue;
+    if (ng === g || (gSolid(ng) && ng !== TER.WATER)) continue;
+    if (!gBuild(ng) && ng !== TER.WATER) continue;
     c.strokeStyle = blendColOf(ng);
     c.beginPath(); c.moveTo(e[2][0], e[2][1]); c.lineTo(e[3][0], e[3][1]); c.stroke();
   }
@@ -220,7 +243,7 @@ function buildMinimapBase() {
   const img = c.createImageData(G.w, G.h);
   for (let i = 0; i < G.w * G.h; i++) {
     const g = G.ground[i], r = G.res[i];
-    let col = hexToRgb(TER_GROUND_COL[g]);
+    let col = hexToRgb(groundHex(g));
     if (r === TER.TREE) col = hexToRgb('#3f7a35');
     else if (r === TER.ROCK) col = hexToRgb('#8d887f');
     else if (r === TER.IRON) col = hexToRgb('#4e4b57');
@@ -316,6 +339,14 @@ function drawBakeView(ctx) {
   ctx.drawImage(G.bake, sx0, sy0, sx1 - sx0, sy1 - sy0, sx0 - OX, sy0, sx1 - sx0, sy1 - sy0);
 }
 
+/* هل نقطة الشبكة (بمنتصف البلاطة) داخل الشاشة؟ (margin بالبكسل العالمي لارتفاع الـsprites) */
+function tileOnScreen(x, y, mt, mb) {
+  const z = G.cam.zoom;
+  const sx = (isoX(x + 0.5, y + 0.5) - G.cam.x) * z + G.vw / 2;
+  const sy = (isoY(x + 0.5, y + 0.5) - G.cam.y) * z + G.vh / 2;
+  return sx > -120 * z && sx < G.vw + 120 * z && sy > -mb * z && sy < G.vh + mt * z;
+}
+
 function drawObjects(ctx) {
   const b = viewBounds();
   const list = [];
@@ -332,7 +363,15 @@ function drawObjects(ctx) {
   for (let y = b.y0; y <= b.y1; y++) {
     for (let x = b.x0; x <= b.x1; x++) {
       const r = G.res[idx(x, y)];
-      if (r) list.push({ d: x + y + 0.5, t: r, x: x, y: y });
+      if (r && tileOnScreen(x, y, 40, 230)) list.push({ d: x + y + 0.5, t: r, x: x, y: y });
+    }
+  }
+  if (G.deco) {
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        const dk = G.deco[idx(x, y)];
+        if (dk && tileOnScreen(x, y, 40, 160) && !(G.bgrid && G.bgrid[idx(x, y)])) list.push({ d: x + y + 0.5, t: 'd', x: x, y: y, k: dk });
+      }
     }
   }
   for (const bb of G.buildings) {
@@ -354,7 +393,18 @@ function drawObjects(ctx) {
     else if (it.t === 'b') drawBuilding(ctx, it.b);
     else if (it.t === 'u') drawUnit(ctx, it.u);
     else if (it.t === 'c') drawCorpse(ctx, it.c);
+    else if (it.t === 'd') drawDeco(ctx, it.x, it.y, it.k);
   }
+}
+
+/* نباتات ديكور (صبار/شجيرات/سرخس) من sprites SHC */
+function drawDeco(ctx, x, y, k) {
+  const v = typeof VEG !== 'undefined' && VEG[k];
+  const im = v && artImg('v_' + v.key);
+  if (!im || !im.complete || !im.naturalWidth) return;
+  const p = tileCenter(x, y), sc = 1.6;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(im, Math.round(p.x - im.naturalWidth * sc / 2), Math.round(p.y + 4 - im.naturalHeight * sc), im.naturalWidth * sc, im.naturalHeight * sc);
 }
 
 /* مباني مسطّحة (حقول): دايمًا تحت كل حاجة. المخزن عنده أكوام طويلة فبيتفرز عادي */
@@ -443,8 +493,9 @@ const TREE_K = 1.4;                  // حجم الشجرة بالنسبة لل�
 function drawTree(ctx, x, y) {
   const p = tileCenter(x, y);
   // نوع الشجرة: رمل → نخل، عشب → تنويع hash بين كستن/بتول/صنوبر (B3)
-  const sand = G.ground[idx(x, y)] === TER.SAND;
-  const key = sand ? 'r_palm' : ['r_tree', 'r_tree2', 'r_tree3'][hash2(x, y) % 3];
+  const sand = gSandy(G.ground[idx(x, y)]);
+  const vk = G.vkind && G.vkind[idx(x, y)];
+  const key = vk && typeof VEG !== 'undefined' && VEG[vk] ? 'v_' + VEG[vk].key : (sand ? 'r_palm' : ['r_tree', 'r_tree2', 'r_tree3'][hash2(x, y) % 3]);
   const im = artImg(key);
   const dw = im && im.naturalWidth ? im.naturalWidth * TREE_K : 80;
   if (im && im.complete && im.naturalWidth > 0) {
@@ -682,6 +733,7 @@ function drawBuilding(ctx, b) {
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
     topY = dy;
+    if (b.built >= 1 && buildingWorking(b)) drawBuildingAnim(ctx, b, sx, sy, true);
     if (b.key === 'keep') {
       const fx = sx, fy = dy + 24;
       ctx.strokeStyle = '#3a2c18'; ctx.lineWidth = 2;
@@ -887,6 +939,7 @@ function bar(ctx, cx, cy, w, h, ratio, col) {
    الوحدات
    ------------------------------------------------------------ */
 function drawUnit(ctx, u) {
+  if (u.state === 'work' && u.job && buildingWorking(u.job)) return;      // العامل ظاهر جوه أنيميشن المبنى
   const p = tileCenter(u.x, u.y);
   const px = p.x, py = p.y;
 
